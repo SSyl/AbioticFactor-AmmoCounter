@@ -32,5 +32,10 @@ return {
         R = 249,
         G = 41,
         B = 41
-    }
+    },
+
+    -- Advanced: Enable debug logging (useful for troubleshooting)
+    -- Leave this as false unless you're experiencing issues
+    -- When enabled, prints detailed information to UE4SS.log
+    Debug = false
 }

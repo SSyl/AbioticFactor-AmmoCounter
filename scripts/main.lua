@@ -1,8 +1,8 @@
 print("=== [Ammo Counter] MOD LOADING ===\n")
 
-local DEBUG = true
 local UEHelpers = require("UEHelpers")
 local Config = require("../config")
+local DEBUG = Config.Debug or false
 
 local function ConvertColor(colorConfig, defaultR, defaultG, defaultB)
     if not colorConfig then
