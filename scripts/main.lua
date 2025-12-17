@@ -21,10 +21,21 @@ local COLOR_ONE_MAG_LEFT = ConvertColor(Config.OneMagLeft, 255, 200, 32)
 local COLOR_MULTIPLE_MAGS = ConvertColor(Config.MultipleMags, 114, 242, 255)
 local THRESHOLD_OVERRIDE = tonumber(Config.OneMagLeftThreshold)
 
-local function DebugLog(message)
-    if DEBUG then
-        print("[Ammo Counter] " .. tostring(message) .. "\n")
+local function Log(message, level)
+    level = level or "info"
+
+    if level == "debug" and not DEBUG then
+        return
     end
+
+    local prefix = ""
+    if level == "error" then
+        prefix = "ERROR: "
+    elseif level == "warning" then
+        prefix = "WARNING: "
+    end
+
+    print("[Ammo Counter] " .. prefix .. tostring(message) .. "\n")
 end
 
 local function IsWeaponReady(weapon)
@@ -90,19 +101,19 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount)
     -- Update if: count changed, weapon changed, or display is wrong (fallback)
     if count and (countChanged or weaponChanged or needsUpdate) then
         if countChanged or weaponChanged then
-            DebugLog("Updating display to: " .. count)
+            Log("Updating display to: " .. count, "debug")
         end
 
         local textWidget = widget.Text_MaxAmmo
         if textWidget and textWidget:IsValid() then
-            DebugLog("Setting text to: " .. tostring(count) .. ", magazineSize: " .. tostring(magazineSize))
+            Log("Setting text to: " .. tostring(count) .. ", magazineSize: " .. tostring(magazineSize), "debug")
 
             local setText = pcall(function()
                 textWidget:SetText(FText(tostring(count)))
             end)
 
             if not setText then
-                DebugLog("ERROR: Failed to set text")
+                Log("Failed to set text", "error")
             end
 
             local colorSuccess, colorErr = pcall(function()
@@ -125,7 +136,7 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount)
             end)
 
             if not colorSuccess then
-                DebugLog("ERROR setting color: " .. tostring(colorErr))
+                Log("Setting color: " .. tostring(colorErr), "error")
             end
         end
 
@@ -171,11 +182,11 @@ local function RegisterAmmoHooks()
         end)
 
         if not success then
-            DebugLog("HOOK ERROR: " .. tostring(err))
+            Log("Hook error: " .. tostring(err), "error")
         end
     end)
 
-    DebugLog("UpdateAmmo hook registered")
+    Log("UpdateAmmo hook registered", "debug")
 end
 
 -- Initialize the mod
@@ -185,7 +196,7 @@ RegisterInitGameStatePostHook(function(GameModeBase)
     -- Called after game state is initialized - safe to register hooks immediately
     if not hooksRegistered then
         hooksRegistered = true
-        DebugLog("Game state initialized, registering hooks")
+        Log("Game state initialized, registering hooks", "debug")
         RegisterAmmoHooks()
     end
 end)
