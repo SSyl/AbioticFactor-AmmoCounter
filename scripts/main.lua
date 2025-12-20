@@ -43,32 +43,41 @@ local function IsWeaponReady(weapon)
         return false
     end
 
-    local currentOwner = weapon.CurrentOwner
-    if not currentOwner or not currentOwner:IsValid() then
+    local ok, currentOwner = pcall(function()
+        return weapon.CurrentOwner
+    end)
+    if not ok or not currentOwner or not currentOwner:IsValid() then
         return false
     end
 
-    local itemData = weapon.ItemData
-    if not itemData or not itemData:IsValid() then
+    local ok2, itemData = pcall(function()
+        return weapon.ItemData
+    end)
+    if not ok2 or not itemData or not itemData:IsValid() then
         return false
     end
 
-    -- Not all ItemInHand_BP items are weapons (e.g. flashlight, medkit)
-    local isWeapon = itemData.IsWeapon_63_57F6A703413EA260B1455CA81F2D4911
-    if not isWeapon then
+    local ok3, isWeapon = pcall(function()
+        return itemData.IsWeapon_63_57F6A703413EA260B1455CA81F2D4911
+    end)
+    if not ok3 or not isWeapon then
         return false
     end
 
     -- WeaponData property uses Unreal Engine's mangled name format: PropertyName_Index_GUID
     -- Found in W_HUD_AmmoCounter_UpdateAmmo bytecode export (line 1039)
     -- Engine requires the full mangled name - short form "WeaponData" causes nullptr errors
-    local weaponData = itemData.WeaponData_61_3C29CF6C4A7F9DD435F9318FEE4B033D
-    if not weaponData or not weaponData:IsValid() then
+    local ok4, weaponData = pcall(function()
+        return itemData.WeaponData_61_3C29CF6C4A7F9DD435F9318FEE4B033D
+    end)
+    if not ok4 or not weaponData or not weaponData:IsValid() then
         return false
     end
 
-    local changeableData = weapon.ChangeableData
-    if not changeableData or not changeableData:IsValid() then
+    local ok5, changeableData = pcall(function()
+        return weapon.ChangeableData
+    end)
+    if not ok5 or not changeableData or not changeableData:IsValid() then
         return false
     end
 
@@ -76,23 +85,30 @@ local function IsWeaponReady(weapon)
 end
 
 -- Update the ammo counter display with inventory count
-local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount)
+local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, cachedMagazineSize)
     local outParams = {}
     weapon:InventoryHasAmmoForCurrentWeapon(false, outParams, {}, {})
     local count = outParams.Count
-
-    -- Get magazine size from widget (already set by UpdateAmmo)
-    local magazineSize = widget.MaxAmmo or 0
 
     local currentWeaponAddress = weapon:GetAddress()
     local weaponChanged = (currentWeaponAddress ~= lastWeaponAddress)
     local countChanged = (count ~= lastCount)
 
+    local magazineSize = cachedMagazineSize
+    if weaponChanged then
+        local ok, mag = pcall(function()
+            return widget.MaxAmmo
+        end)
+        magazineSize = (ok and mag) or 0
+    end
+
     -- On first load or weapon switch, check if display is wrong (fallback only)
     local needsUpdate = false
     if not countChanged and not weaponChanged and count then
-        local textWidget = widget.Text_MaxAmmo
-        if textWidget and textWidget:IsValid() then
+        local ok2, textWidget = pcall(function()
+            return widget.Text_MaxAmmo
+        end)
+        if ok2 and textWidget and textWidget:IsValid() then
             local currentText = textWidget:GetText():ToString()
             needsUpdate = (currentText ~= tostring(count))
         end
@@ -104,8 +120,10 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount)
             Log("Updating display to: " .. count, "debug")
         end
 
-        local textWidget = widget.Text_MaxAmmo
-        if textWidget and textWidget:IsValid() then
+        local ok3, textWidget = pcall(function()
+            return widget.Text_MaxAmmo
+        end)
+        if ok3 and textWidget and textWidget:IsValid() then
             Log("Setting text to: " .. tostring(count) .. ", magazineSize: " .. tostring(magazineSize), "debug")
 
             local setText = pcall(function()
@@ -140,10 +158,10 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount)
             end
         end
 
-        return count, currentWeaponAddress
+        return count, currentWeaponAddress, magazineSize
     end
 
-    return lastCount, lastWeaponAddress
+    return lastCount, lastWeaponAddress, magazineSize
 end
 
 -- Hook UpdateAmmo to replace magazine capacity with inventory count
@@ -151,6 +169,7 @@ local function RegisterAmmoHooks()
     -- Cache per weapon to handle weapon switching correctly
     local lastWeaponPath = nil
     local lastInventoryCount = -1
+    local cachedMagazineSize = 0
 
     -- For Blueprint functions, BOTH callbacks act as post-callbacks
     -- So we put our logic in the "pre-hook" which actually runs AFTER UpdateAmmo
@@ -168,16 +187,19 @@ local function RegisterAmmoHooks()
                 return
             end
 
-            local weapon = playerPawn.ItemInHand_BP
-            if not IsWeaponReady(weapon) then
+            local ok, weapon = pcall(function()
+                return playerPawn.ItemInHand_BP
+            end)
+            if not ok or not IsWeaponReady(weapon) then
                 return
             end
 
-            lastInventoryCount, lastWeaponPath = UpdateAmmoDisplay(
+            lastInventoryCount, lastWeaponPath, cachedMagazineSize = UpdateAmmoDisplay(
                 widget,
                 weapon,
                 lastWeaponPath,
-                lastInventoryCount
+                lastInventoryCount,
+                cachedMagazineSize
             )
         end)
 
