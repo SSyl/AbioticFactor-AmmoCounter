@@ -291,42 +291,56 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, c
     local countChanged = (count ~= lastCount)
 
     local maxCapacity = cachedMaxCapacity
-    if weaponChanged then
+    -- Only fetch if weapon changed OR we've never successfully fetched (still -1)
+    if weaponChanged or maxCapacity == -1 then
         local ok, mag = pcall(function()
             return widget.MaxAmmo
         end)
-        maxCapacity = (ok and mag) or 0
+        if ok then
+            maxCapacity = mag or 0
+        end
     end
 
-    -- Get current ammo in gun and set color
-    local ok, currentAmmoWidget = pcall(function()
-        return widget.Text_CurrentAmmo
-    end)
+    -- Set current ammo color when count or weapon changes
+    if countChanged or weaponChanged then
+        Log("Attempting to set current ammo color (countChanged=" .. tostring(countChanged) .. ", weaponChanged=" .. tostring(weaponChanged) .. ")", "debug")
 
-    if ok and currentAmmoWidget:IsValid() then
-        local ok2, currentAmmo = pcall(function()
-            return widget.CurrentAmmo
+        local ok, currentAmmoWidget = pcall(function()
+            return widget.Text_CurrentAmmo
         end)
 
-        if ok2 and currentAmmo ~= nil and maxCapacity > 0 then
-            local percentage = currentAmmo / maxCapacity
-            local color
-
-            if currentAmmo == 0 then
-                color = COLOR_NO_AMMO
-            elseif percentage <= LOADED_AMMO_WARNING then
-                color = COLOR_AMMO_LOW
-            else
-                color = COLOR_AMMO_GOOD
-            end
-
-            pcall(function()
-                local colorStruct = {
-                    SpecifiedColor = color,
-                    ColorUseRule = "UseColor_Specified"
-                }
-                currentAmmoWidget:SetColorAndOpacity(colorStruct)
+        if ok and currentAmmoWidget:IsValid() then
+            local ok2, currentAmmo = pcall(function()
+                return widget.CurrentAmmo
             end)
+
+            Log("CurrentAmmo value: " .. tostring(currentAmmo) .. ", maxCapacity: " .. tostring(maxCapacity), "debug")
+
+            if ok2 and currentAmmo ~= nil then
+                local color
+
+                if currentAmmo == 0 then
+                    color = COLOR_NO_AMMO
+                elseif maxCapacity > 0 then
+                    local percentage = currentAmmo / maxCapacity
+                    if percentage <= LOADED_AMMO_WARNING then
+                        color = COLOR_AMMO_LOW
+                    else
+                        color = COLOR_AMMO_GOOD
+                    end
+                else
+                    -- maxCapacity not ready yet, use default cyan
+                    color = COLOR_AMMO_GOOD
+                end
+
+                pcall(function()
+                    local colorStruct = {
+                        SpecifiedColor = color,
+                        ColorUseRule = "UseColor_Specified"
+                    }
+                    currentAmmoWidget:SetColorAndOpacity(colorStruct)
+                end)
+            end
         end
     end
 
@@ -528,7 +542,7 @@ local function RegisterAmmoHooks()
     -- Cache per weapon to handle weapon switching correctly
     local lastWeaponPath = nil
     local lastInventoryCount = -1
-    local cachedMaxCapacity = 0
+    local cachedMaxCapacity = -1  -- -1 = not fetched yet, 0+ = actual value
 
     -- For Blueprint functions, BOTH callbacks act as post-callbacks
     -- So we put our logic in the "pre-hook" which actually runs AFTER UpdateAmmo
