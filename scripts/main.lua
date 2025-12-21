@@ -108,7 +108,7 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, c
         local ok2, textWidget = pcall(function()
             return widget.Text_MaxAmmo
         end)
-        if ok2 and textWidget and textWidget:IsValid() then
+        if ok2 and textWidget:IsValid() then
             local currentText = textWidget:GetText():ToString()
             needsUpdate = (currentText ~= tostring(count))
         end
@@ -123,7 +123,7 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, c
         local ok3, textWidget = pcall(function()
             return widget.Text_MaxAmmo
         end)
-        if ok3 and textWidget and textWidget:IsValid() then
+        if ok3 and textWidget:IsValid() then
             Log("Setting text to: " .. tostring(count) .. ", magazineSize: " .. tostring(magazineSize), "debug")
 
             local setText = pcall(function()
