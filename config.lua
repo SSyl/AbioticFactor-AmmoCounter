@@ -4,28 +4,34 @@
 return {
     -- Display mode for ammo counter
     -- false = "Ammo in Gun | Ammo in Inventory" (default, original mod behavior)
-    -- true  = "Ammo in Gun | Magazine Capacity | Ammo in Inventory"
-    ShowMagazineCapacity = false,
+    -- true  = "Ammo in Gun | Max Capacity | Ammo in Inventory"
+    -- Example: Grinder missing half ammo with 40 in inventory would show: 5 | 10 | 40
+    ShowMaxCapacity = false,
 
-    -- Low ammo warning threshold
-    -- "default" = Automatic (yellow when you have 1 magazine or less of ammo)
-    --   This adapts to each weapon: 10 rounds for 9mm pistol, 1 arrow for crossbow, etc.
+    -- Loaded ammo warning threshold (ammo currently in the gun)
+    -- When current ammo drops to or below this percentage, it turns yellow
+    -- Value: 0.0 to 1.0 (e.g., 0.5 = 50% of max capacity)
+    LoadedAmmoWarning = 0.5,
+
+    -- Inventory ammo warning threshold (spare ammo in inventory)
+    -- "adaptive" = Adapts to each weapon's max capacity (yellow when 1 reload or less)
+    -- Examples: 10 rounds for 9mm Pistol, 10 for Grinder, 1 arrow for Crossbow
     -- Or set a specific number to use the same threshold for all weapons:
-    --   OneMagLeftThreshold = 10   -- Yellow when 10 or fewer rounds remain
-    --   OneMagLeftThreshold = 20   -- Yellow when 20 or fewer rounds remain
-    OneMagLeftThreshold = "default",
+    --   InventoryAmmoWarning = 20   -- Yellow when 20 or fewer rounds remain
+    --   InventoryAmmoWarning = 50   -- Yellow when 50 or fewer rounds remain
+    InventoryAmmoWarning = "adaptive",
 
-    -- Color when you have multiple magazines worth of ammo (default UI cyan)
+    -- Color when ammo is at good levels (default UI cyan)
     -- RGB values are 0-255
-    MultipleMags = {
+    AmmoGood = {
         R = 114,
         G = 242,
         B = 255
     },
 
-    -- Color when you have one magazine or less of ammo (yellow)
+    -- Color when ammo is low (yellow)
     -- RGB values are 0-255
-    OneMagLeft = {
+    AmmoLow = {
         R = 255,
         G = 200,
         B = 32

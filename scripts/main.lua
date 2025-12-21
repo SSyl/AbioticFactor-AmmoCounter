@@ -3,7 +3,7 @@ print("=== [Ammo Counter] MOD LOADING ===\n")
 local UEHelpers = require("UEHelpers")
 local Config = require("../config")
 local DEBUG = Config.Debug or false
-local SHOW_MAG_CAPACITY = Config.ShowMagazineCapacity or false
+local SHOW_MAX_CAPACITY = Config.ShowMaxCapacity or false
 
 local function ConvertColor(colorConfig, defaultR, defaultG, defaultB)
     if not colorConfig then
@@ -18,9 +18,10 @@ local function ConvertColor(colorConfig, defaultR, defaultG, defaultB)
 end
 
 local COLOR_NO_AMMO = ConvertColor(Config.NoAmmo, 249, 41, 41)
-local COLOR_ONE_MAG_LEFT = ConvertColor(Config.OneMagLeft, 255, 200, 32)
-local COLOR_MULTIPLE_MAGS = ConvertColor(Config.MultipleMags, 114, 242, 255)
-local THRESHOLD_OVERRIDE = tonumber(Config.OneMagLeftThreshold)
+local COLOR_AMMO_LOW = ConvertColor(Config.AmmoLow, 255, 200, 32)
+local COLOR_AMMO_GOOD = ConvertColor(Config.AmmoGood, 114, 242, 255)
+local LOADED_AMMO_WARNING = Config.LoadedAmmoWarning or 0.5
+local INVENTORY_AMMO_THRESHOLD = tonumber(Config.InventoryAmmoWarning)
 
 local function Log(message, level)
     level = level or "info"
@@ -85,7 +86,7 @@ local function IsWeaponReady(weapon)
     return true
 end
 
--- Create inventory ammo widget (only used when SHOW_MAG_CAPACITY is true)
+-- Create inventory ammo widget (only used when SHOW_MAX_CAPACITY is true)
 local inventoryTextWidget = nil
 local separatorWidget = nil
 
@@ -228,7 +229,7 @@ local function CreateInventoryWidget(widget)
 end
 
 -- Update the ammo counter display with inventory count
-local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, cachedMagazineSize)
+local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, cachedMaxCapacity)
     local outParams = {}
     weapon:InventoryHasAmmoForCurrentWeapon(false, outParams, {}, {})
     local count = outParams.Count
@@ -237,12 +238,44 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, c
     local weaponChanged = (currentWeaponAddress ~= lastWeaponAddress)
     local countChanged = (count ~= lastCount)
 
-    local magazineSize = cachedMagazineSize
+    local maxCapacity = cachedMaxCapacity
     if weaponChanged then
         local ok, mag = pcall(function()
             return widget.MaxAmmo
         end)
-        magazineSize = (ok and mag) or 0
+        maxCapacity = (ok and mag) or 0
+    end
+
+    -- Get current ammo in gun and set color
+    local ok, currentAmmoWidget = pcall(function()
+        return widget.Text_CurrentAmmo
+    end)
+
+    if ok and currentAmmoWidget:IsValid() then
+        local ok2, currentAmmo = pcall(function()
+            return widget.CurrentAmmo
+        end)
+
+        if ok2 and currentAmmo ~= nil and maxCapacity > 0 then
+            local percentage = currentAmmo / maxCapacity
+            local color
+
+            if currentAmmo == 0 then
+                color = COLOR_NO_AMMO
+            elseif percentage <= LOADED_AMMO_WARNING then
+                color = COLOR_AMMO_LOW
+            else
+                color = COLOR_AMMO_GOOD
+            end
+
+            pcall(function()
+                local colorStruct = {
+                    SpecifiedColor = color,
+                    ColorUseRule = "UseColor_Specified"
+                }
+                currentAmmoWidget:SetColorAndOpacity(colorStruct)
+            end)
+        end
     end
 
     -- On first load or weapon switch, check if display is wrong (fallback only)
@@ -263,8 +296,8 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, c
             Log("Updating display to: " .. count, "debug")
         end
 
-        if SHOW_MAG_CAPACITY then
-            -- Mode: "Ammo in Gun | Magazine Capacity | Ammo in Inventory"
+        if SHOW_MAX_CAPACITY then
+            -- Mode: "Ammo in Gun | Max Capacity | Ammo in Inventory"
             -- Create separator if it doesn't exist
             if not separatorWidget or not separatorWidget:IsValid() then
                 CreateSeparatorWidget(widget)
@@ -290,15 +323,15 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, c
                     end
 
                     local colorSuccess, colorErr = pcall(function()
-                        local threshold = THRESHOLD_OVERRIDE or magazineSize
+                        local threshold = INVENTORY_AMMO_THRESHOLD or maxCapacity
 
                         local color
                         if count == 0 then
                             color = COLOR_NO_AMMO
                         elseif count > 0 and count <= threshold then
-                            color = COLOR_ONE_MAG_LEFT
+                            color = COLOR_AMMO_LOW
                         else
-                            color = COLOR_MULTIPLE_MAGS
+                            color = COLOR_AMMO_GOOD
                         end
 
                         local colorStruct = {
@@ -319,7 +352,7 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, c
                 return widget.Text_MaxAmmo
             end)
             if ok3 and textWidget:IsValid() then
-                Log("Setting text to: " .. tostring(count) .. ", magazineSize: " .. tostring(magazineSize), "debug")
+                Log("Setting text to: " .. tostring(count) .. ", maxCapacity: " .. tostring(maxCapacity), "debug")
 
                 local setText = pcall(function()
                     textWidget:SetText(FText(tostring(count)))
@@ -330,15 +363,15 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, c
                 end
 
                 local colorSuccess, colorErr = pcall(function()
-                    local threshold = THRESHOLD_OVERRIDE or magazineSize
+                    local threshold = INVENTORY_AMMO_THRESHOLD or maxCapacity
 
                     local color
                     if count == 0 then
                         color = COLOR_NO_AMMO
                     elseif count > 0 and count <= threshold then
-                        color = COLOR_ONE_MAG_LEFT
+                        color = COLOR_AMMO_LOW
                     else
-                        color = COLOR_MULTIPLE_MAGS
+                        color = COLOR_AMMO_GOOD
                     end
 
                     local colorStruct = {
@@ -354,18 +387,18 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, c
             end
         end
 
-        return count, currentWeaponAddress, magazineSize
+        return count, currentWeaponAddress, maxCapacity
     end
 
-    return lastCount, lastWeaponAddress, magazineSize
+    return lastCount, lastWeaponAddress, maxCapacity
 end
 
--- Hook UpdateAmmo to replace magazine capacity with inventory count
+-- Hook UpdateAmmo to replace max capacity with inventory count
 local function RegisterAmmoHooks()
     -- Cache per weapon to handle weapon switching correctly
     local lastWeaponPath = nil
     local lastInventoryCount = -1
-    local cachedMagazineSize = 0
+    local cachedMaxCapacity = 0
 
     -- For Blueprint functions, BOTH callbacks act as post-callbacks
     -- So we put our logic in the "pre-hook" which actually runs AFTER UpdateAmmo
@@ -390,12 +423,12 @@ local function RegisterAmmoHooks()
                 return
             end
 
-            lastInventoryCount, lastWeaponPath, cachedMagazineSize = UpdateAmmoDisplay(
+            lastInventoryCount, lastWeaponPath, cachedMaxCapacity = UpdateAmmoDisplay(
                 widget,
                 weapon,
                 lastWeaponPath,
                 lastInventoryCount,
-                cachedMagazineSize
+                cachedMaxCapacity
             )
         end)
 
