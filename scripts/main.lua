@@ -3,16 +3,20 @@ print("=== [Ammo Counter] MOD LOADING ===\n")
 local UEHelpers = require("UEHelpers")
 local Config = require("../config")
 local DEBUG = Config.Debug or false
-local SHOW_MAX_CAPACITY = Config.ShowMaxCapacity or false
 
 local function ConvertColor(colorConfig, defaultR, defaultG, defaultB)
+    local function clampRGB(val, default)
+        local num = tonumber(val) or default
+        return math.max(0, math.min(255, num))
+    end
+
     if not colorConfig then
         return {R = defaultR / 255, G = defaultG / 255, B = defaultB / 255, A = 1.0}
     end
     return {
-        R = (colorConfig.R or defaultR) / 255,
-        G = (colorConfig.G or defaultG) / 255,
-        B = (colorConfig.B or defaultB) / 255,
+        R = clampRGB(colorConfig.R, defaultR) / 255,
+        G = clampRGB(colorConfig.G, defaultG) / 255,
+        B = clampRGB(colorConfig.B, defaultB) / 255,
         A = 1.0
     }
 end
@@ -20,8 +24,17 @@ end
 local COLOR_NO_AMMO = ConvertColor(Config.NoAmmo, 249, 41, 41)
 local COLOR_AMMO_LOW = ConvertColor(Config.AmmoLow, 255, 200, 32)
 local COLOR_AMMO_GOOD = ConvertColor(Config.AmmoGood, 114, 242, 255)
-local LOADED_AMMO_WARNING = Config.LoadedAmmoWarning or 0.5
+
+-- Validate and clamp LoadedAmmoWarning to 0.0-1.0
+local LOADED_AMMO_WARNING = math.max(0.0, math.min(1.0, tonumber(Config.LoadedAmmoWarning) or 0.5))
+
+-- Validate InventoryAmmoWarning (nil = adaptive, number = clamped to min 1)
 local INVENTORY_AMMO_THRESHOLD = tonumber(Config.InventoryAmmoWarning)
+if INVENTORY_AMMO_THRESHOLD then
+    INVENTORY_AMMO_THRESHOLD = math.max(1, INVENTORY_AMMO_THRESHOLD)
+end
+
+local SHOW_MAX_CAPACITY = Config.ShowMaxCapacity == true
 
 local function Log(message, level)
     level = level or "info"
@@ -87,6 +100,7 @@ local function IsWeaponReady(weapon)
 end
 
 -- Create inventory ammo widget (only used when SHOW_MAX_CAPACITY is true)
+-- Cached at module level to persist across UpdateAmmo calls
 local inventoryTextWidget = nil
 local separatorWidget = nil
 
