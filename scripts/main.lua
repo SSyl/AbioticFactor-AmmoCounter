@@ -152,9 +152,27 @@ local function CreateSeparatorWidget(widget)
         end)
 
         if ok4 and originalOffsets then
-            -- Position between MaxAmmo and InventoryAmmo (same relative offset as InventoryAmmo text)
+            local baseOffset = 60.83
+            local extraOffset = 0
+
+            -- Get MaxAmmo text width for dynamic positioning
+            local ok5, maxAmmoText = pcall(function()
+                return widget.Text_MaxAmmo
+            end)
+
+            if ok5 and maxAmmoText:IsValid() then
+                local ok6, desiredSize = pcall(function()
+                    return maxAmmoText:GetDesiredSize()
+                end)
+
+                if ok6 and desiredSize then
+                    local baselineWidth = 37
+                    extraOffset = desiredSize.X - baselineWidth
+                end
+            end
+
             slot:SetOffsets({
-                Left = originalOffsets.Left + 60.83,
+                Left = originalOffsets.Left + baseOffset + extraOffset,
                 Top = originalOffsets.Top,
                 Right = originalOffsets.Right,
                 Bottom = originalOffsets.Bottom
@@ -226,8 +244,28 @@ local function CreateInventoryWidget(widget)
             end)
 
             if ok5 and maxOffsets then
+                -- Calculate dynamic offset based on MaxAmmo text width
+                local baseOffset = 60.83
+                local extraOffset = 0
+
+                -- Try to get the rendered size of Text_MaxAmmo
+                local ok6, desiredSize = pcall(function()
+                    return maxAmmoText:GetDesiredSize()
+                end)
+
+                if ok6 and desiredSize then
+                    Log("Initial MaxAmmo DesiredSize: X=" .. tostring(desiredSize.X) .. ", Y=" .. tostring(desiredSize.Y), "debug")
+                    -- Adjust offset based on text width (negative = move left, positive = move right)
+                    -- Baseline is 2-digit width (~37px like pistol "10")
+                    local baselineWidth = 37
+                    extraOffset = desiredSize.X - baselineWidth
+                    Log("Initial extraOffset: " .. tostring(extraOffset), "debug")
+                else
+                    Log("Failed to get initial DesiredSize from MaxAmmo text", "debug")
+                end
+
                 slot:SetOffsets({
-                    Left = maxOffsets.Left + 60.83,
+                    Left = maxOffsets.Left + baseOffset + extraOffset,
                     Top = -10.0,
                     Right = 57.0,
                     Bottom = maxOffsets.Bottom
@@ -317,6 +355,44 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, c
                 CreateSeparatorWidget(widget)
             end
 
+            -- Reposition separator if weapon changed
+            if weaponChanged and separatorWidget and separatorWidget:IsValid() then
+                local ok, sepSlot = pcall(function()
+                    return separatorWidget.Slot
+                end)
+
+                local ok2, originalSep = pcall(function()
+                    return widget.Image_0
+                end)
+
+                if ok and sepSlot:IsValid() and ok2 and originalSep:IsValid() then
+                    local ok3, originalSlot = pcall(function()
+                        return originalSep.Slot
+                    end)
+
+                    if ok3 and originalSlot:IsValid() then
+                        local ok4, originalOffsets = pcall(function()
+                            return originalSlot:GetOffsets()
+                        end)
+
+                        if ok4 and originalOffsets then
+                            local baseOffset = 60.83
+                            -- Estimate width from digit count: 1 digit=~19px, 2 digit=~37px, 3 digit=~55px
+                            local digitCount = string.len(tostring(maxCapacity))
+                            local estimatedWidth = 19 + (digitCount - 1) * 18
+                            local extraOffset = estimatedWidth - 37
+
+                            sepSlot:SetOffsets({
+                                Left = originalOffsets.Left + baseOffset + extraOffset,
+                                Top = originalOffsets.Top,
+                                Right = originalOffsets.Right,
+                                Bottom = originalOffsets.Bottom
+                            })
+                        end
+                    end
+                end
+            end
+
             -- Create inventory widget if it doesn't exist
             local invWidget = inventoryTextWidget
             if not invWidget or not invWidget:IsValid() then
@@ -324,6 +400,46 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, c
             end
 
             if invWidget and invWidget:IsValid() then
+                -- Reposition if weapon changed
+                if weaponChanged then
+                    local ok, invSlot = pcall(function()
+                        return invWidget.Slot
+                    end)
+
+                    local ok2, maxAmmoText = pcall(function()
+                        return widget.Text_MaxAmmo
+                    end)
+
+                    if ok and invSlot:IsValid() and ok2 and maxAmmoText:IsValid() then
+                        local ok3, maxAmmoSlot = pcall(function()
+                            return maxAmmoText.Slot
+                        end)
+
+                        if ok3 and maxAmmoSlot:IsValid() then
+                            local ok4, maxOffsets = pcall(function()
+                                return maxAmmoSlot:GetOffsets()
+                            end)
+
+                            if ok4 and maxOffsets then
+                                local baseOffset = 60.83
+                                -- Estimate width from digit count: 1 digit=~19px, 2 digit=~37px, 3 digit=~55px
+                                local digitCount = string.len(tostring(maxCapacity))
+                                local estimatedWidth = 19 + (digitCount - 1) * 18
+                                local extraOffset = estimatedWidth - 37
+
+                                Log("MaxCapacity: " .. tostring(maxCapacity) .. ", digits: " .. digitCount .. ", extraOffset: " .. tostring(extraOffset), "debug")
+
+                                invSlot:SetOffsets({
+                                    Left = maxOffsets.Left + baseOffset + extraOffset,
+                                    Top = -10.0,
+                                    Right = 57.0,
+                                    Bottom = maxOffsets.Bottom
+                                })
+                            end
+                        end
+                    end
+                end
+
                 -- Only update if value actually changed
                 if countChanged or weaponChanged then
                     Log("Setting inventory count to: " .. tostring(count), "debug")
