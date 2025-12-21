@@ -2,6 +2,11 @@
 -- Customize the colors for different ammo states
 
 return {
+    -- Display mode for ammo counter
+    -- false = "Ammo in Gun | Ammo in Inventory" (default, original mod behavior)
+    -- true  = "Ammo in Gun | Magazine Capacity | Ammo in Inventory"
+    ShowMagazineCapacity = false,
+
     -- Low ammo warning threshold
     -- "default" = Automatic (yellow when you have 1 magazine or less of ammo)
     --   This adapts to each weapon: 10 rounds for 9mm pistol, 1 arrow for crossbow, etc.

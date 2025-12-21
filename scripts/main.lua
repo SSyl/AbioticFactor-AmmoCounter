@@ -3,6 +3,7 @@ print("=== [Ammo Counter] MOD LOADING ===\n")
 local UEHelpers = require("UEHelpers")
 local Config = require("../config")
 local DEBUG = Config.Debug or false
+local SHOW_MAG_CAPACITY = Config.ShowMagazineCapacity or false
 
 local function ConvertColor(colorConfig, defaultR, defaultG, defaultB)
     if not colorConfig then
@@ -84,6 +85,148 @@ local function IsWeaponReady(weapon)
     return true
 end
 
+-- Create inventory ammo widget (only used when SHOW_MAG_CAPACITY is true)
+local inventoryTextWidget = nil
+local separatorWidget = nil
+
+local function CreateSeparatorWidget(widget)
+    if separatorWidget and separatorWidget:IsValid() then
+        return separatorWidget
+    end
+
+    local ok, originalSeparator = pcall(function()
+        return widget.Image_0
+    end)
+
+    if not ok or not originalSeparator:IsValid() then
+        Log("Failed to get Image_0 separator", "error")
+        return nil
+    end
+
+    local ok2, canvas = pcall(function()
+        return widget.VisCanvas
+    end)
+
+    if not ok2 or not canvas:IsValid() then
+        Log("Failed to get VisCanvas for separator", "error")
+        return nil
+    end
+
+    local imageClass = originalSeparator:GetClass()
+    -- Use Template parameter to copy properties from original
+    local newSeparator = StaticConstructObject(imageClass, canvas, FName("InventoryAmmoSeparator"), 0, 0, false, false, originalSeparator)
+
+    if not newSeparator:IsValid() then
+        Log("Failed to create separator widget", "error")
+        return nil
+    end
+
+    local slot = canvas:AddChildToCanvas(newSeparator)
+    if not slot:IsValid() then
+        Log("Failed to add separator to canvas", "error")
+        return nil
+    end
+
+    local ok3, originalSlot = pcall(function()
+        return originalSeparator.Slot
+    end)
+
+    if ok3 and originalSlot:IsValid() then
+        local ok4, originalOffsets = pcall(function()
+            return originalSlot:GetOffsets()
+        end)
+
+        if ok4 and originalOffsets then
+            -- Position between MaxAmmo and InventoryAmmo (same relative offset as InventoryAmmo text)
+            slot:SetOffsets({
+                Left = originalOffsets.Left + 60.83,
+                Top = originalOffsets.Top,
+                Right = originalOffsets.Right,
+                Bottom = originalOffsets.Bottom
+            })
+        end
+    end
+
+    separatorWidget = newSeparator
+    Log("Separator widget created", "debug")
+    return newSeparator
+end
+
+local function CreateInventoryWidget(widget)
+    if inventoryTextWidget and inventoryTextWidget:IsValid() then
+        return inventoryTextWidget
+    end
+
+    local ok, currentAmmoText = pcall(function()
+        return widget.Text_CurrentAmmo
+    end)
+
+    if not ok or not currentAmmoText:IsValid() then
+        Log("Failed to get Text_CurrentAmmo for cloning", "error")
+        return nil
+    end
+
+    local ok2, canvas = pcall(function()
+        return widget.VisCanvas
+    end)
+
+    if not ok2 or not canvas:IsValid() then
+        Log("Failed to get VisCanvas", "error")
+        return nil
+    end
+
+    local textBlockClass = currentAmmoText:GetClass()
+    -- Use Template parameter to copy properties from Text_CurrentAmmo
+    local newWidget = StaticConstructObject(textBlockClass, canvas, FName("Text_InventoryAmmo"), 0, 0, false, false, currentAmmoText)
+
+    if not newWidget:IsValid() then
+        Log("Failed to create inventory text widget", "error")
+        return nil
+    end
+
+    -- Set text justification to left so it grows to the right instead of center
+    pcall(function()
+        newWidget.Justification = "Left"
+    end)
+
+    local slot = canvas:AddChildToCanvas(newWidget)
+    if not slot:IsValid() then
+        Log("Failed to add widget to canvas", "error")
+        return nil
+    end
+
+    -- Get Text_MaxAmmo for positioning reference
+    local ok3, maxAmmoText = pcall(function()
+        return widget.Text_MaxAmmo
+    end)
+
+    if ok3 and maxAmmoText:IsValid() then
+        local ok4, maxAmmoSlot = pcall(function()
+            return maxAmmoText.Slot
+        end)
+
+        if ok4 and maxAmmoSlot:IsValid() then
+            local ok5, maxOffsets = pcall(function()
+                return maxAmmoSlot:GetOffsets()
+            end)
+
+            if ok5 and maxOffsets then
+                slot:SetOffsets({
+                    Left = maxOffsets.Left + 60.83,
+                    Top = -10.0,
+                    Right = 57.0,
+                    Bottom = maxOffsets.Bottom
+                })
+            end
+        end
+    end
+
+
+    inventoryTextWidget = newWidget
+    Log("Inventory ammo widget created", "debug")
+    return newWidget
+end
+
 -- Update the ammo counter display with inventory count
 local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, cachedMagazineSize)
     local outParams = {}
@@ -120,41 +263,94 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, c
             Log("Updating display to: " .. count, "debug")
         end
 
-        local ok3, textWidget = pcall(function()
-            return widget.Text_MaxAmmo
-        end)
-        if ok3 and textWidget:IsValid() then
-            Log("Setting text to: " .. tostring(count) .. ", magazineSize: " .. tostring(magazineSize), "debug")
-
-            local setText = pcall(function()
-                textWidget:SetText(FText(tostring(count)))
-            end)
-
-            if not setText then
-                Log("Failed to set text", "error")
+        if SHOW_MAG_CAPACITY then
+            -- Mode: "Ammo in Gun | Magazine Capacity | Ammo in Inventory"
+            -- Create separator if it doesn't exist
+            if not separatorWidget or not separatorWidget:IsValid() then
+                CreateSeparatorWidget(widget)
             end
 
-            local colorSuccess, colorErr = pcall(function()
-                local threshold = THRESHOLD_OVERRIDE or magazineSize
+            -- Create inventory widget if it doesn't exist
+            local invWidget = inventoryTextWidget
+            if not invWidget or not invWidget:IsValid() then
+                invWidget = CreateInventoryWidget(widget)
+            end
 
-                local color
-                if count == 0 then
-                    color = COLOR_NO_AMMO
-                elseif count > 0 and count <= threshold then
-                    color = COLOR_ONE_MAG_LEFT
-                else
-                    color = COLOR_MULTIPLE_MAGS
+            if invWidget and invWidget:IsValid() then
+                -- Only update if value actually changed
+                if countChanged or weaponChanged then
+                    Log("Setting inventory count to: " .. tostring(count), "debug")
+
+                    local setText = pcall(function()
+                        invWidget:SetText(FText(tostring(count)))
+                    end)
+
+                    if not setText then
+                        Log("Failed to set inventory text", "error")
+                    end
+
+                    local colorSuccess, colorErr = pcall(function()
+                        local threshold = THRESHOLD_OVERRIDE or magazineSize
+
+                        local color
+                        if count == 0 then
+                            color = COLOR_NO_AMMO
+                        elseif count > 0 and count <= threshold then
+                            color = COLOR_ONE_MAG_LEFT
+                        else
+                            color = COLOR_MULTIPLE_MAGS
+                        end
+
+                        local colorStruct = {
+                            SpecifiedColor = color,
+                            ColorUseRule = "UseColor_Specified"
+                        }
+                        invWidget:SetColorAndOpacity(colorStruct)
+                    end)
+
+                    if not colorSuccess then
+                        Log("Setting inventory color: " .. tostring(colorErr), "error")
+                    end
+                end
+            end
+        else
+            -- Mode: "Ammo in Gun | Ammo in Inventory" (original behavior)
+            local ok3, textWidget = pcall(function()
+                return widget.Text_MaxAmmo
+            end)
+            if ok3 and textWidget:IsValid() then
+                Log("Setting text to: " .. tostring(count) .. ", magazineSize: " .. tostring(magazineSize), "debug")
+
+                local setText = pcall(function()
+                    textWidget:SetText(FText(tostring(count)))
+                end)
+
+                if not setText then
+                    Log("Failed to set text", "error")
                 end
 
-                local colorStruct = {
-                    SpecifiedColor = color,
-                    ColorUseRule = "UseColor_Specified"
-                }
-                textWidget:SetColorAndOpacity(colorStruct)
-            end)
+                local colorSuccess, colorErr = pcall(function()
+                    local threshold = THRESHOLD_OVERRIDE or magazineSize
 
-            if not colorSuccess then
-                Log("Setting color: " .. tostring(colorErr), "error")
+                    local color
+                    if count == 0 then
+                        color = COLOR_NO_AMMO
+                    elseif count > 0 and count <= threshold then
+                        color = COLOR_ONE_MAG_LEFT
+                    else
+                        color = COLOR_MULTIPLE_MAGS
+                    end
+
+                    local colorStruct = {
+                        SpecifiedColor = color,
+                        ColorUseRule = "UseColor_Specified"
+                    }
+                    textWidget:SetColorAndOpacity(colorStruct)
+                end)
+
+                if not colorSuccess then
+                    Log("Setting color: " .. tostring(colorErr), "error")
+                end
             end
         end
 
