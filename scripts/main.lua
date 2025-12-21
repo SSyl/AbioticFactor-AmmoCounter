@@ -39,21 +39,21 @@ local function Log(message, level)
 end
 
 local function IsWeaponReady(weapon)
-    if not weapon or not weapon:IsValid() then
+    if not weapon:IsValid() then
         return false
     end
 
     local ok, currentOwner = pcall(function()
         return weapon.CurrentOwner
     end)
-    if not ok or not currentOwner or not currentOwner:IsValid() then
+    if not ok or not currentOwner:IsValid() then
         return false
     end
 
     local ok2, itemData = pcall(function()
         return weapon.ItemData
     end)
-    if not ok2 or not itemData or not itemData:IsValid() then
+    if not ok2 or not itemData:IsValid() then
         return false
     end
 
@@ -70,14 +70,14 @@ local function IsWeaponReady(weapon)
     local ok4, weaponData = pcall(function()
         return itemData.WeaponData_61_3C29CF6C4A7F9DD435F9318FEE4B033D
     end)
-    if not ok4 or not weaponData or not weaponData:IsValid() then
+    if not ok4 or not weaponData:IsValid() then
         return false
     end
 
     local ok5, changeableData = pcall(function()
         return weapon.ChangeableData
     end)
-    if not ok5 or not changeableData or not changeableData:IsValid() then
+    if not ok5 or not changeableData:IsValid() then
         return false
     end
 
@@ -178,12 +178,12 @@ local function RegisterAmmoHooks()
 
         local success, err = pcall(function()
             local widget = Context:get()
-            if not widget or not widget:IsValid() then
+            if not widget:IsValid() then
                 return
             end
 
             local playerPawn = UEHelpers.GetPlayer()
-            if not playerPawn or not playerPawn:IsValid() then
+            if not playerPawn:IsValid() then
                 return
             end
 
