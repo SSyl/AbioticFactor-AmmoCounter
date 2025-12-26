@@ -1,106 +1,126 @@
 print("=== [Ammo Counter] MOD LOADING ===\n")
 
+--[[
+=================================================================================
+DATA DISCOVERY NOTES (for future refactoring)
+=================================================================================
+
+HOW WE FOUND THE WEAPON DATA:
+
+1. PLAYER CHARACTER (Live View)
+   Search: "Abiotic_PlayerCharacter_C"
+   Found: Abiotic_PlayerCharacter_C /Game/Maps/Facility.Facility:PersistentLevel.Abiotic_PlayerCharacter_C_2147471781
+
+2. WEAPON IN HAND (property on player)
+   Path: Player → ItemInHand_BP
+   Type: AAbiotic_Weapon_ParentBP_C (inherits from AAbiotic_Item_ParentBP_C)
+   Value: /Game/Maps/Facility.Facility:PersistentLevel.Weapon_Gun_wFlashlight_C_2147465130
+
+3. WEAPON PROPERTIES (found on Abiotic_Weapon_ParentBP_C)
+   Location: D:\Git Repos\UE5-Modding-Notes\AbioticFactor\dumps\types\Abiotic_Weapon_ParentBP.lua
+
+   CURRENT AMMO (loaded in magazine):
+   - weapon.CurrentRoundsInMagazine (int32)
+   - Always available immediately, no initialization delay
+
+   MAGAZINE CAPACITY:
+   - weapon.MaxMagazineSize (int32)
+   - Always available immediately, no initialization delay
+
+   AMMO TYPE FILTER:
+   - weapon.CompatibleAmmoTypes (array of FDataTableRowHandle)
+   - Empty array = no ammo system (laser pistol, screwdriver, etc.)
+   - Has entries = uses ammo (pistol, sledge, fishing rod, etc.)
+
+4. INVENTORY AMMO (still from weapon object method)
+   - weapon:InventoryHasAmmoForCurrentWeapon(false, outParams, {}, {})
+   - Returns count in outParams.Count
+
+5. WIDGET VISIBILITY CHECK
+   - widget:GetVisibility() returns enum:
+     0 = Visible
+     1 = Collapsed (hidden, skip processing)
+     2 = Hidden (hidden, skip processing)
+     3 = HitTestInvisible (visible, can't click)
+     4 = SelfHitTestInvisible (visible, can't click - normal for HUD)
+   - Only skip if 1 or 2 (truly hidden)
+   - Game hides ammo counter widget when no ammo system on current item
+
+WHY THIS MATTERS:
+- OLD WAY: Read widget.CurrentAmmo and widget.MaxAmmo
+  Problem: Widget properties initialize 1 frame late → red ammo bug on load
+
+- NEW WAY: Read weapon.CurrentRoundsInMagazine and weapon.MaxMagazineSize
+  Solution: Weapon properties available immediately → correct color on first frame
+
+REFACTORING STATUS:
+✅ Read from weapon.CurrentRoundsInMagazine and weapon.MaxMagazineSize (not widget)
+✅ Add widget visibility check for filtering
+✅ Use LogUtil and ConfigUtil for cleaner code
+✅ Remove IsWeaponReady() (visibility check replaces it)
+
+TODO:
+- Simplify UpdateAmmoDisplay (remove complex timing checks)
+- Clean up debug logging (still has consolidated logs with deduplication)
+- Consider removing log deduplication (might not be needed with cleaner logging)
+=================================================================================
+]]--
+
 local UEHelpers = require("UEHelpers")
-local Config = require("../config")
-local DEBUG = Config.Debug or false
+local LogUtil = require("LogUtil")
+local ConfigUtil = require("ConfigUtil")
 
-local function ConvertColor(colorConfig, defaultR, defaultG, defaultB)
-    local function clampRGB(val, default)
-        local num = tonumber(val) or default
-        return math.max(0, math.min(255, num))
-    end
+-- ============================================================
+-- CONFIG VALIDATION
+-- ============================================================
 
-    if not colorConfig then
-        return {R = defaultR / 255, G = defaultG / 255, B = defaultB / 255, A = 1.0}
-    end
-    return {
-        R = clampRGB(colorConfig.R, defaultR) / 255,
-        G = clampRGB(colorConfig.G, defaultG) / 255,
-        B = clampRGB(colorConfig.B, defaultB) / 255,
-        A = 1.0
-    }
+local DefaultConfig = {
+    Debug = false,
+    ShowMaxCapacity = false,
+    LoadedAmmoWarning = 0.5,  -- 50% magazine capacity
+    InventoryAmmoWarning = nil,  -- nil = adaptive (matches magazine size)
+    NoAmmo = {R = 249, G = 41, B = 41},  -- Red
+    AmmoLow = {R = 255, G = 200, B = 32},  -- Yellow
+    AmmoGood = {R = 114, G = 242, B = 255}  -- Cyan
+}
+
+local UserConfig = require("../config")
+local Config = ConfigUtil.MergeDefaults(UserConfig, DefaultConfig)
+
+-- Create logger (needs to be created after config is merged for Debug flag)
+local Log = LogUtil.CreateLogger("Ammo Counter", Config)
+
+-- Validate colors
+Config.NoAmmo = ConfigUtil.ValidateColor(Config.NoAmmo, DefaultConfig.NoAmmo, Log)
+Config.AmmoLow = ConfigUtil.ValidateColor(Config.AmmoLow, DefaultConfig.AmmoLow, Log)
+Config.AmmoGood = ConfigUtil.ValidateColor(Config.AmmoGood, DefaultConfig.AmmoGood, Log)
+
+-- Validate numbers
+Config.LoadedAmmoWarning = ConfigUtil.ValidateNumber(Config.LoadedAmmoWarning, DefaultConfig.LoadedAmmoWarning, 0.0, 1.0, Log, "LoadedAmmoWarning")
+if Config.InventoryAmmoWarning then
+    Config.InventoryAmmoWarning = ConfigUtil.ValidateNumber(Config.InventoryAmmoWarning, nil, 1, nil, Log, "InventoryAmmoWarning")
 end
 
-local COLOR_NO_AMMO = ConvertColor(Config.NoAmmo, 249, 41, 41)
-local COLOR_AMMO_LOW = ConvertColor(Config.AmmoLow, 255, 200, 32)
-local COLOR_AMMO_GOOD = ConvertColor(Config.AmmoGood, 114, 242, 255)
+-- Validate booleans
+Config.ShowMaxCapacity = ConfigUtil.ValidateBoolean(Config.ShowMaxCapacity, DefaultConfig.ShowMaxCapacity, Log, "ShowMaxCapacity")
+Config.Debug = ConfigUtil.ValidateBoolean(Config.Debug, DefaultConfig.Debug, Log, "Debug")
 
--- Validate and clamp LoadedAmmoWarning to 0.0-1.0
-local LOADED_AMMO_WARNING = math.max(0.0, math.min(1.0, tonumber(Config.LoadedAmmoWarning) or 0.5))
+-- Convert colors to UE4 format
+local COLOR_NO_AMMO = ConfigUtil.ConvertColor(Config.NoAmmo, 249, 41, 41)
+local COLOR_AMMO_LOW = ConfigUtil.ConvertColor(Config.AmmoLow, 255, 200, 32)
+local COLOR_AMMO_GOOD = ConfigUtil.ConvertColor(Config.AmmoGood, 114, 242, 255)
 
--- Validate InventoryAmmoWarning (nil = adaptive, number = clamped to min 1)
-local INVENTORY_AMMO_THRESHOLD = tonumber(Config.InventoryAmmoWarning)
-if INVENTORY_AMMO_THRESHOLD then
-    INVENTORY_AMMO_THRESHOLD = math.max(1, INVENTORY_AMMO_THRESHOLD)
-end
-
-local SHOW_MAX_CAPACITY = Config.ShowMaxCapacity == true
+-- Config constants
+local LOADED_AMMO_WARNING = Config.LoadedAmmoWarning
+local INVENTORY_AMMO_THRESHOLD = Config.InventoryAmmoWarning
+local SHOW_MAX_CAPACITY = Config.ShowMaxCapacity
 
 -- Log cache for deduplication
 local lastLogMessage = nil
 
-local function Log(message, level)
-    level = level or "info"
-
-    if level == "debug" and not DEBUG then
-        return
-    end
-
-    local prefix = ""
-    if level == "error" then
-        prefix = "ERROR: "
-    elseif level == "warning" then
-        prefix = "WARNING: "
-    end
-
-    print("[Ammo Counter] " .. prefix .. tostring(message) .. "\n")
-end
-
-local function IsWeaponReady(weapon)
-    if not weapon:IsValid() then
-        return false
-    end
-
-    local ok, currentOwner = pcall(function()
-        return weapon.CurrentOwner
-    end)
-    if not ok or not currentOwner:IsValid() then
-        return false
-    end
-
-    local ok2, itemData = pcall(function()
-        return weapon.ItemData
-    end)
-    if not ok2 or not itemData:IsValid() then
-        return false
-    end
-
-    local ok3, isWeapon = pcall(function()
-        return itemData.IsWeapon_63_57F6A703413EA260B1455CA81F2D4911
-    end)
-    if not ok3 or not isWeapon then
-        return false
-    end
-
-    -- WeaponData property uses Unreal Engine's mangled name format: PropertyName_Index_GUID
-    -- Found in W_HUD_AmmoCounter_UpdateAmmo bytecode export (line 1039)
-    -- Engine requires the full mangled name - short form "WeaponData" causes nullptr errors
-    local ok4, weaponData = pcall(function()
-        return itemData.WeaponData_61_3C29CF6C4A7F9DD435F9318FEE4B033D
-    end)
-    if not ok4 or not weaponData:IsValid() then
-        return false
-    end
-
-    local ok5, changeableData = pcall(function()
-        return weapon.ChangeableData
-    end)
-    if not ok5 or not changeableData:IsValid() then
-        return false
-    end
-
-    return true
-end
+-- ============================================================
+-- WIDGET CREATION
+-- ============================================================
 
 -- Create inventory ammo widget (only used when SHOW_MAX_CAPACITY is true)
 -- Cached at module level to persist across UpdateAmmo calls
