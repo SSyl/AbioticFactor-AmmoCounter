@@ -1,5 +1,5 @@
 -- ============================================================
--- CONFIG UTILITIES (Universal)
+-- CONFIG UTILITIES
 -- Handles configuration validation and provides config-related helpers
 -- Generic utilities that work across different mod types
 -- ============================================================
@@ -103,6 +103,52 @@ function ConfigUtil.ValidateBoolean(value, default, logFunc, fieldName)
         return default
     end
     return value
+end
+
+-- ============================================================
+-- MOD-SPECIFIC CONFIG VALIDATORS
+-- ============================================================
+
+-- Validate Ammo Counter config (handles all validation and conversion in one call)
+-- Returns config with colors already converted to UE format
+function ConfigUtil.ValidateAmmoCounterConfig(userConfig, logFunc)
+    local defaults = {
+        Debug = false,
+        ShowMaxCapacity = false,
+        LoadedAmmoWarning = 0.5,
+        InventoryAmmoWarning = nil,
+        NoAmmo = {R = 249, G = 41, B = 41},
+        AmmoLow = {R = 255, G = 200, B = 32},
+        AmmoGood = {R = 114, G = 242, B = 255}
+    }
+
+    local config = ConfigUtil.MergeDefaults(userConfig, defaults)
+
+    -- Validate and convert colors to UE format (0-1 with alpha)
+    config.NoAmmo = ConfigUtil.ConvertColor(
+        ConfigUtil.ValidateColor(config.NoAmmo, defaults.NoAmmo, logFunc),
+        defaults.NoAmmo.R, defaults.NoAmmo.G, defaults.NoAmmo.B
+    )
+    config.AmmoLow = ConfigUtil.ConvertColor(
+        ConfigUtil.ValidateColor(config.AmmoLow, defaults.AmmoLow, logFunc),
+        defaults.AmmoLow.R, defaults.AmmoLow.G, defaults.AmmoLow.B
+    )
+    config.AmmoGood = ConfigUtil.ConvertColor(
+        ConfigUtil.ValidateColor(config.AmmoGood, defaults.AmmoGood, logFunc),
+        defaults.AmmoGood.R, defaults.AmmoGood.G, defaults.AmmoGood.B
+    )
+
+    -- Validate numbers
+    config.LoadedAmmoWarning = ConfigUtil.ValidateNumber(config.LoadedAmmoWarning, defaults.LoadedAmmoWarning, 0.0, 1.0, logFunc, "LoadedAmmoWarning")
+    if config.InventoryAmmoWarning then
+        config.InventoryAmmoWarning = ConfigUtil.ValidateNumber(config.InventoryAmmoWarning, nil, 1, nil, logFunc, "InventoryAmmoWarning")
+    end
+
+    -- Validate booleans
+    config.ShowMaxCapacity = ConfigUtil.ValidateBoolean(config.ShowMaxCapacity, defaults.ShowMaxCapacity, logFunc, "ShowMaxCapacity")
+    config.Debug = ConfigUtil.ValidateBoolean(config.Debug, defaults.Debug, logFunc, "Debug")
+
+    return config
 end
 
 return ConfigUtil
