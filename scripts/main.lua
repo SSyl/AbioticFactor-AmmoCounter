@@ -58,11 +58,13 @@ REFACTORING STATUS:
 ✅ Add widget visibility check for filtering
 ✅ Use LogUtil and ConfigUtil for cleaner code
 ✅ Remove IsWeaponReady() (visibility check replaces it)
+✅ Extract color logic into helper functions (GetAmmoColor, GetInventoryAmmoColor)
+✅ Simplify debug logging (removed log deduplication, cleaner format)
+✅ Add error logging for invalid maxCapacity state
 
-TODO:
-- Simplify UpdateAmmoDisplay (remove complex timing checks)
-- Clean up debug logging (still has consolidated logs with deduplication)
-- Consider removing log deduplication (might not be needed with cleaner logging)
+REMAINING:
+- Consider further cleanup of UpdateAmmoDisplay if needed
+- Test all functionality to ensure refactoring didn't break anything
 =================================================================================
 ]]--
 
@@ -115,8 +117,39 @@ local LOADED_AMMO_WARNING = Config.LoadedAmmoWarning
 local INVENTORY_AMMO_THRESHOLD = Config.InventoryAmmoWarning
 local SHOW_MAX_CAPACITY = Config.ShowMaxCapacity
 
--- Log cache for deduplication
-local lastLogMessage = nil
+-- ============================================================
+-- HELPER FUNCTIONS
+-- ============================================================
+
+-- Determine ammo color based on loaded ammo and capacity
+-- Returns color or nil if invalid state
+local function GetAmmoColor(loadedAmmo, maxCapacity)
+    if loadedAmmo == 0 then
+        return COLOR_NO_AMMO
+    elseif maxCapacity > 0 then
+        local percentage = loadedAmmo / maxCapacity
+        if percentage <= LOADED_AMMO_WARNING then
+            return COLOR_AMMO_LOW
+        else
+            return COLOR_AMMO_GOOD
+        end
+    else
+        -- This shouldn't happen with weapon object reads - log error
+        Log("ERROR: maxCapacity is " .. tostring(maxCapacity) .. " when loadedAmmo is " .. tostring(loadedAmmo), "error")
+        return nil  -- Don't set color, let widget keep default
+    end
+end
+
+-- Determine inventory ammo color based on count and threshold
+local function GetInventoryAmmoColor(inventoryAmmo, threshold)
+    if inventoryAmmo == 0 then
+        return COLOR_NO_AMMO
+    elseif inventoryAmmo > 0 and inventoryAmmo <= threshold then
+        return COLOR_AMMO_LOW
+    else
+        return COLOR_AMMO_GOOD
+    end
+end
 
 -- ============================================================
 -- WIDGET CREATION
@@ -345,60 +378,28 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastInventor
         end
     end
 
-    -- Build consolidated log message
-    local logMessage = string.format(
-        "=== UpdateAmmoDisplay ===\n" ..
-        "  weaponChanged: %s | inventoryChanged: %s (%d->%d) | loadedChanged: %s (%d->%d)\n" ..
-        "  Loaded: %d | Inventory: %d | MaxCap: %d",
-        tostring(weaponChanged),
-        tostring(inventoryAmmoChanged), lastInventoryAmmo or -1, inventoryAmmo or -1,
-        tostring(loadedAmmoChanged), lastLoadedAmmo or -1, loadedAmmo or -1,
-        loadedAmmo or -1, inventoryAmmo or -1, maxCapacity or -1
-    )
-
-    -- Only log if message changed
-    if logMessage ~= lastLogMessage then
-        Log(logMessage, "debug")
-        lastLogMessage = logMessage
+    -- Debug logging (only when something changes)
+    if weaponChanged or inventoryAmmoChanged or loadedAmmoChanged then
+        Log(string.format("Ammo update - Loaded: %d/%d | Inventory: %d | Changed: weapon=%s inv=%s loaded=%s",
+            loadedAmmo or 0, maxCapacity or 0, inventoryAmmo or 0,
+            tostring(weaponChanged), tostring(inventoryAmmoChanged), tostring(loadedAmmoChanged)), "debug")
     end
 
-    -- Set loaded ammo color when inventory, weapon, or loaded ammo changes
+    -- Update loaded ammo color when values change
     if inventoryAmmoChanged or weaponChanged or loadedAmmoChanged then
         local ok, currentAmmoWidget = pcall(function()
             return widget.Text_CurrentAmmo
         end)
 
-        if ok and currentAmmoWidget:IsValid() then
-            if loadedAmmo ~= nil then
-                local color
-                local colorName = ""
+        if ok and currentAmmoWidget:IsValid() and loadedAmmo ~= nil then
+            local color = GetAmmoColor(loadedAmmo, maxCapacity)
 
-                if loadedAmmo == 0 then
-                    color = COLOR_NO_AMMO
-                    colorName = "NO_AMMO (red)"
-                elseif maxCapacity > 0 then
-                    local percentage = loadedAmmo / maxCapacity
-                    if percentage <= LOADED_AMMO_WARNING then
-                        color = COLOR_AMMO_LOW
-                        colorName = "AMMO_LOW (yellow)"
-                    else
-                        color = COLOR_AMMO_GOOD
-                        colorName = "AMMO_GOOD (cyan)"
-                    end
-                else
-                    -- maxCapacity not ready yet, use default cyan
-                    color = COLOR_AMMO_GOOD
-                    colorName = "AMMO_GOOD (cyan - maxCap not ready)"
-                end
-
-                Log("  >>> COLOR UPDATE: " .. colorName, "debug")
-
+            if color then
                 pcall(function()
-                    local colorStruct = {
+                    currentAmmoWidget:SetColorAndOpacity({
                         SpecifiedColor = color,
                         ColorUseRule = "UseColor_Specified"
-                    }
-                    currentAmmoWidget:SetColorAndOpacity(colorStruct)
+                    })
                 end)
             end
         end
@@ -521,21 +522,12 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastInventor
 
                     local colorSuccess, colorErr = pcall(function()
                         local threshold = INVENTORY_AMMO_THRESHOLD or maxCapacity
+                        local color = GetInventoryAmmoColor(inventoryAmmo, threshold)
 
-                        local color
-                        if inventoryAmmo == 0 then
-                            color = COLOR_NO_AMMO
-                        elseif inventoryAmmo > 0 and inventoryAmmo <= threshold then
-                            color = COLOR_AMMO_LOW
-                        else
-                            color = COLOR_AMMO_GOOD
-                        end
-
-                        local colorStruct = {
+                        invWidget:SetColorAndOpacity({
                             SpecifiedColor = color,
                             ColorUseRule = "UseColor_Specified"
-                        }
-                        invWidget:SetColorAndOpacity(colorStruct)
+                        })
                     end)
 
                     if not colorSuccess then
@@ -559,21 +551,12 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastInventor
 
                 local colorSuccess, colorErr = pcall(function()
                     local threshold = INVENTORY_AMMO_THRESHOLD or maxCapacity
+                    local color = GetInventoryAmmoColor(inventoryAmmo, threshold)
 
-                    local color
-                    if inventoryAmmo == 0 then
-                        color = COLOR_NO_AMMO
-                    elseif inventoryAmmo > 0 and inventoryAmmo <= threshold then
-                        color = COLOR_AMMO_LOW
-                    else
-                        color = COLOR_AMMO_GOOD
-                    end
-
-                    local colorStruct = {
+                    textWidget:SetColorAndOpacity({
                         SpecifiedColor = color,
                         ColorUseRule = "UseColor_Specified"
-                    }
-                    textWidget:SetColorAndOpacity(colorStruct)
+                    })
                 end)
 
                 if not colorSuccess then
