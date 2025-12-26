@@ -1,8 +1,9 @@
-# Claude Code directory
-.claude/
+# Ignore all folders starting with a dot
+.*/
 
-# Markdown files except README
+# Ignore zip files
+*.zip
+
+# Ignore all markdown files except README.md
 *.md
 !README.md
-
-*.zip
