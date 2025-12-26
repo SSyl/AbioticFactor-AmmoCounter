@@ -2,12 +2,6 @@
 -- Customize the colors for different ammo states
 
 return {
-    -- Display mode for ammo counter
-    -- false = "Ammo in Gun | Ammo in Inventory" (default, original mod behavior)
-    -- true  = "Ammo in Gun | Max Capacity | Ammo in Inventory"
-    -- Example: Grinder missing half ammo with 40 in inventory would show: 5 | 10 | 40
-    ShowMaxCapacity = false,
-
     -- Loaded ammo warning threshold (ammo currently in the gun)
     -- When current ammo drops to or below this percentage, it turns yellow
     -- Value: 0.0 to 1.0 (e.g., 0.5 = 50% of max capacity)
@@ -44,6 +38,12 @@ return {
         G = 41,
         B = 41
     },
+
+    -- Display mode for ammo counter
+    -- false = "Ammo in Gun | Ammo in Inventory" (default, original mod behavior)
+    -- true  = "Ammo in Gun | Max Capacity | Ammo in Inventory"
+    -- Example: Grinder missing half ammo with 40 in inventory would show: 5 | 10 | 40
+    ShowMaxCapacity = false,
 
     -- Advanced: Enable debug logging (useful for troubleshooting)
     -- Leave this as false unless you're experiencing issues
