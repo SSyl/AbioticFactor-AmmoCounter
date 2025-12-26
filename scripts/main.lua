@@ -1,29 +1,5 @@
 print("=== [Ammo Counter] MOD LOADING ===\n")
 
---[[
-=================================================================================
-AMMO COUNTER MOD - Refactored Architecture
-=================================================================================
-
-CORE PRINCIPLE: Read from weapon object, not widget
-- weapon.CurrentRoundsInMagazine = loaded ammo (always correct, immediate)
-- weapon.MaxMagazineSize = magazine capacity (always correct, immediate)
-- widget visibility check = filtering (game hides widget for non-ammo items)
-
-DATA SOURCES (from Live View + Type Dumps):
-Player: UEHelpers.GetPlayer() → Abiotic_PlayerCharacter_C
-Weapon: player.ItemInHand_BP → AAbiotic_Weapon_ParentBP_C
-Loaded Ammo: weapon.CurrentRoundsInMagazine (int32)
-Magazine Size: weapon.MaxMagazineSize (int32)
-Inventory Ammo: weapon:InventoryHasAmmoForCurrentWeapon() → outParams.Count
-
-Type Dump Locations:
-- Abiotic_Weapon_ParentBP.lua (weapon properties)
-- Abiotic_PlayerCharacter.lua (player properties)
-
-=================================================================================
-]]--
-
 local UEHelpers = require("UEHelpers")
 local LogUtil = require("LogUtil")
 local ConfigUtil = require("ConfigUtil")
@@ -36,7 +12,6 @@ local UserConfig = require("../config")
 local Config = ConfigUtil.ValidateAmmoCounterConfig(UserConfig, LogUtil.CreateLogger("Ammo Counter (Config)", UserConfig))
 local Log = LogUtil.CreateLogger("Ammo Counter", Config)
 
--- Colors are already in UE format from ValidateAmmoCounterConfig
 local COLOR_NO_AMMO = Config.NoAmmo
 local COLOR_AMMO_LOW = Config.AmmoLow
 local COLOR_AMMO_GOOD = Config.AmmoGood
@@ -60,10 +35,6 @@ local function GetWeaponAmmoData(weapon)
         inventoryAmmo = nil,
         isValidWeapon = false
     }
-
-    if not weapon:IsValid() then
-        return data
-    end
 
     local ok1, loaded = pcall(function()
         return weapon.CurrentRoundsInMagazine
@@ -123,18 +94,16 @@ local function GetInventoryAmmoColor(inventoryAmmo, maxCapacity)
 end
 
 local function SetWidgetColor(widget, color)
-    if not widget or not widget:IsValid() or not color then
+    if not widget:IsValid() or not color then
         return false
     end
 
-    local ok = pcall(function()
-        widget:SetColorAndOpacity({
-            SpecifiedColor = color,
-            ColorUseRule = "UseColor_Specified"
-        })
-    end)
+    widget:SetColorAndOpacity({
+        SpecifiedColor = color,
+        ColorUseRule = "UseColor_Specified"
+    })
 
-    return ok
+    return true
 end
 
 -- ============================================================
@@ -150,35 +119,24 @@ end
 
 local function GetSlotOffsets(slot)
     if not slot then return nil end
-    local ok, offsets = pcall(function()
-        return slot:GetOffsets()
-    end)
-    return ok and offsets or nil
+    return slot:GetOffsets()
 end
 
 local function SetSlotPosition(slot, left, top, right, bottom)
     if not slot then return false end
 
-    return pcall(function()
-        slot:SetOffsets({
-            Left = left,
-            Top = top,
-            Right = right,
-            Bottom = bottom
-        })
-    end)
+    slot:SetOffsets({
+        Left = left,
+        Top = top,
+        Right = right,
+        Bottom = bottom
+    })
+
+    return true
 end
 
 -- Clone widget using Template parameter to copy all properties
 local function CloneWidget(templateWidget, canvas, widgetName)
-    if not templateWidget or not templateWidget:IsValid() then
-        return nil
-    end
-
-    if not canvas or not canvas:IsValid() then
-        return nil
-    end
-
     local widgetClass = templateWidget:GetClass()
     local newWidget = StaticConstructObject(
         widgetClass,
@@ -188,12 +146,12 @@ local function CloneWidget(templateWidget, canvas, widgetName)
         templateWidget  -- Template parameter - copies all properties
     )
 
-    if not newWidget or not newWidget:IsValid() then
+    if not newWidget:IsValid() then
         return nil
     end
 
     local slot = canvas:AddChildToCanvas(newWidget)
-    if not slot or not slot:IsValid() then
+    if not slot:IsValid() then
         return nil
     end
 
@@ -217,7 +175,7 @@ local function CreateSeparatorWidget(widget)
         return widget.VisCanvas
     end)
 
-    if not ok or not ok2 then
+    if not (ok and originalSep:IsValid()) or not (ok2 and canvas:IsValid()) then
         Log("Failed to get separator template or canvas", "error")
         return nil
     end
@@ -229,7 +187,6 @@ local function CreateSeparatorWidget(widget)
     end
 
     separatorWidget = newSeparator
-    Log("Separator widget created", "debug")
     return newSeparator
 end
 
@@ -247,7 +204,7 @@ local function CreateInventoryWidget(widget)
         return widget.VisCanvas
     end)
 
-    if not ok or not ok2 then
+    if not (ok and textTemplate:IsValid()) or not (ok2 and canvas:IsValid()) then
         Log("Failed to get text template or canvas", "error")
         return nil
     end
@@ -260,12 +217,9 @@ local function CreateInventoryWidget(widget)
 
     -- IMPORTANT: Use SetJustification() function, not property assignment
     -- Widget is already constructed and will be displayed - must use function calls
-    pcall(function()
-        newWidget:SetJustification(0)  -- 0 = Left, 1 = Center, 2 = Right
-    end)
+    newWidget:SetJustification(0)  -- 0 = Left, 1 = Center, 2 = Right
 
     inventoryTextWidget = newWidget
-    Log("Inventory text widget created", "debug")
     return newWidget
 end
 
@@ -358,9 +312,7 @@ local function UpdateSimpleMode(widget, inventoryAmmo, maxCapacity)
         return
     end
 
-    pcall(function()
-        textWidget:SetText(FText(tostring(inventoryAmmo)))
-    end)
+    textWidget:SetText(FText(tostring(inventoryAmmo)))
 
     local color = GetInventoryAmmoColor(inventoryAmmo, maxCapacity)
     SetWidgetColor(textWidget, color)
@@ -388,9 +340,7 @@ local function UpdateShowMaxCapacityMode(widget, inventoryAmmo, maxCapacity, wea
         RepositionShowMaxCapacityWidgets(widget, maxCapacity)
     end
 
-    pcall(function()
-        invWidget:SetText(FText(tostring(inventoryAmmo)))
-    end)
+    invWidget:SetText(FText(tostring(inventoryAmmo)))
 
     local color = GetInventoryAmmoColor(inventoryAmmo, maxCapacity)
     SetWidgetColor(invWidget, color)
@@ -432,15 +382,7 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastInventor
     local weaponChanged = (currentWeaponAddress ~= lastWeaponAddress)
     local inventoryChanged = (data.inventoryAmmo ~= lastInventoryAmmo)
 
-    if weaponChanged then
-        Log(string.format("Weapon changed - Loaded: %d/%d | Inventory: %d", data.loadedAmmo or 0, data.maxCapacity or 0, data.inventoryAmmo or 0), "debug")
-    end
-
-    if inventoryChanged then
-        Log(string.format("Inventory ammo changed: %d -> %d", lastInventoryAmmo or 0, data.inventoryAmmo or 0), "debug")
-    end
-
-    -- Always update loaded ammo color (runs every frame for smooth color transitions)
+    -- Always update loaded ammo color (runs every frame and will get overriden otherwise)
     UpdateLoadedAmmoColor(widget, data.loadedAmmo, data.maxCapacity)
 
     if inventoryChanged or weaponChanged then
@@ -467,8 +409,6 @@ local function RegisterAmmoHooks()
             end
 
             -- Filter by visibility (game hides VisCanvas for items that don't use ammo)
-            -- VisCanvas visibility is what actually controls ammo counter display
-            -- pcall needed: property might not exist
             local ok_vis, visCanvas = pcall(function()
                 return widget.VisCanvas
             end)
@@ -477,7 +417,6 @@ local function RegisterAmmoHooks()
                 return
             end
 
-            -- No pcall needed: direct method call on valid object
             local visibility = visCanvas:GetVisibility()
 
             -- SelfHitTest (3) = active, Collapsed (1) = hidden
@@ -498,10 +437,9 @@ local function RegisterAmmoHooks()
                 return
             end
 
-            -- Early exit for non-weapons
+
             if not weapon:IsA("/Game/Blueprints/Items/Weapons/Abiotic_Weapon_ParentBP.Abiotic_Weapon_ParentBP_C") then
-                Log("ItemInHand is not a weapon - class: " .. weapon:GetClass():GetFullName(), "debug")
-                return
+                return -- Early exit for non-weapons
             end
 
             lastWeaponAddress, lastInventoryAmmo = UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastInventoryAmmo)
