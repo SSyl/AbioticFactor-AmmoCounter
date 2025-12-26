@@ -65,6 +65,11 @@ REFACTORING STATUS:
 REMAINING:
 - Consider further cleanup of UpdateAmmoDisplay if needed
 - Test all functionality to ensure refactoring didn't break anything
+
+FUTURE OPTIMIZATIONS (Maybe):
+- Consider caching weapon property reads to avoid reading every frame
+  (Currently reads CurrentRoundsInMagazine and MaxMagazineSize each frame,
+   but reads are very cheap and needed for change detection)
 =================================================================================
 ]]--
 
@@ -343,10 +348,20 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastInventor
         return lastInventoryAmmo, lastWeaponAddress, cachedMaxCapacity, lastLoadedAmmo
     end
 
-    -- Get inventory ammo count
-    local outParams = {}
-    weapon:InventoryHasAmmoForCurrentWeapon(false, outParams, {}, {})
-    local inventoryAmmo = outParams.Count
+    -- Get inventory ammo count (weapon can become invalid between IsValid check and this call)
+    local inventoryAmmo = 0
+    local ok, outParams = pcall(function()
+        local params = {}
+        weapon:InventoryHasAmmoForCurrentWeapon(false, params, {}, {})
+        return params
+    end)
+
+    if ok and outParams then
+        inventoryAmmo = outParams.Count or 0
+    else
+        -- Weapon became invalid during call, return cached values
+        return lastInventoryAmmo, lastWeaponAddress, cachedMaxCapacity, lastLoadedAmmo
+    end
 
     -- Check weapon change
     local currentWeaponAddress = weapon:GetAddress()
