@@ -156,6 +156,22 @@ local function GetInventoryAmmoColor(inventoryAmmo, threshold)
     end
 end
 
+-- Set widget color (wrapper to reduce duplication)
+local function SetWidgetColor(widget, color)
+    if not widget or not widget:IsValid() or not color then
+        return false
+    end
+
+    local ok = pcall(function()
+        widget:SetColorAndOpacity({
+            SpecifiedColor = color,
+            ColorUseRule = "UseColor_Specified"
+        })
+    end)
+
+    return ok
+end
+
 -- ============================================================
 -- WIDGET CREATION
 -- ============================================================
@@ -408,15 +424,7 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastInventor
 
         if ok and currentAmmoWidget:IsValid() and loadedAmmo ~= nil then
             local color = GetAmmoColor(loadedAmmo, maxCapacity)
-
-            if color then
-                pcall(function()
-                    currentAmmoWidget:SetColorAndOpacity({
-                        SpecifiedColor = color,
-                        ColorUseRule = "UseColor_Specified"
-                    })
-                end)
-            end
+            SetWidgetColor(currentAmmoWidget, color)
         end
     end
 
@@ -535,19 +543,9 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastInventor
                         Log("Failed to set inventory text", "error")
                     end
 
-                    local colorSuccess, colorErr = pcall(function()
-                        local threshold = INVENTORY_AMMO_THRESHOLD or maxCapacity
-                        local color = GetInventoryAmmoColor(inventoryAmmo, threshold)
-
-                        invWidget:SetColorAndOpacity({
-                            SpecifiedColor = color,
-                            ColorUseRule = "UseColor_Specified"
-                        })
-                    end)
-
-                    if not colorSuccess then
-                        Log("Setting inventory color: " .. tostring(colorErr), "error")
-                    end
+                    local threshold = INVENTORY_AMMO_THRESHOLD or maxCapacity
+                    local color = GetInventoryAmmoColor(inventoryAmmo, threshold)
+                    SetWidgetColor(invWidget, color)
                 end
             end
         else
@@ -564,19 +562,9 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastInventor
                     Log("Failed to set text", "error")
                 end
 
-                local colorSuccess, colorErr = pcall(function()
-                    local threshold = INVENTORY_AMMO_THRESHOLD or maxCapacity
-                    local color = GetInventoryAmmoColor(inventoryAmmo, threshold)
-
-                    textWidget:SetColorAndOpacity({
-                        SpecifiedColor = color,
-                        ColorUseRule = "UseColor_Specified"
-                    })
-                end)
-
-                if not colorSuccess then
-                    Log("Setting color: " .. tostring(colorErr), "error")
-                end
+                local threshold = INVENTORY_AMMO_THRESHOLD or maxCapacity
+                local color = GetInventoryAmmoColor(inventoryAmmo, threshold)
+                SetWidgetColor(textWidget, color)
             end
         end
 
