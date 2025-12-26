@@ -36,6 +36,9 @@ end
 
 local SHOW_MAX_CAPACITY = Config.ShowMaxCapacity == true
 
+-- Log cache for deduplication
+local lastLogMessage = nil
+
 local function Log(message, level)
     level = level or "info"
 
@@ -281,57 +284,94 @@ local function CreateInventoryWidget(widget)
 end
 
 -- Update the ammo counter display with inventory count
-local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, cachedMaxCapacity)
+local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastInventoryAmmo, cachedMaxCapacity, lastLoadedAmmo)
+    -- Validate weapon is still valid (can become invalid during weapon switching)
+    if not weapon:IsValid() then
+        return lastInventoryAmmo, lastWeaponAddress, cachedMaxCapacity, lastLoadedAmmo
+    end
+
+    -- Get inventory ammo count
     local outParams = {}
     weapon:InventoryHasAmmoForCurrentWeapon(false, outParams, {}, {})
-    local count = outParams.Count
+    local inventoryAmmo = outParams.Count
 
+    -- Check weapon change
     local currentWeaponAddress = weapon:GetAddress()
     local weaponChanged = (currentWeaponAddress ~= lastWeaponAddress)
-    local countChanged = (count ~= lastCount)
 
+    -- Check inventory ammo change
+    local inventoryAmmoChanged = (inventoryAmmo ~= lastInventoryAmmo)
+
+    -- Read loaded ammo directly from weapon (NOT widget - immediate and reliable)
+    local loadedAmmo = nil
+    local ok_ammo, ammo_val = pcall(function()
+        return weapon.CurrentRoundsInMagazine
+    end)
+    if ok_ammo and ammo_val ~= nil then
+        loadedAmmo = ammo_val
+    end
+
+    -- Check loaded ammo change
+    local loadedAmmoChanged = (loadedAmmo ~= lastLoadedAmmo)
+
+    -- Read magazine capacity directly from weapon (NOT widget - immediate and reliable)
     local maxCapacity = cachedMaxCapacity
-    -- Only fetch if weapon changed OR we've never successfully fetched (still -1)
     if weaponChanged or maxCapacity == -1 then
         local ok, mag = pcall(function()
-            return widget.MaxAmmo
+            return weapon.MaxMagazineSize
         end)
-        if ok then
-            maxCapacity = mag or 0
+        if ok and mag then
+            maxCapacity = mag
         end
     end
 
-    -- Set current ammo color when count or weapon changes
-    if countChanged or weaponChanged then
-        Log("Attempting to set current ammo color (countChanged=" .. tostring(countChanged) .. ", weaponChanged=" .. tostring(weaponChanged) .. ")", "debug")
+    -- Build consolidated log message
+    local logMessage = string.format(
+        "=== UpdateAmmoDisplay ===\n" ..
+        "  weaponChanged: %s | inventoryChanged: %s (%d->%d) | loadedChanged: %s (%d->%d)\n" ..
+        "  Loaded: %d | Inventory: %d | MaxCap: %d",
+        tostring(weaponChanged),
+        tostring(inventoryAmmoChanged), lastInventoryAmmo or -1, inventoryAmmo or -1,
+        tostring(loadedAmmoChanged), lastLoadedAmmo or -1, loadedAmmo or -1,
+        loadedAmmo or -1, inventoryAmmo or -1, maxCapacity or -1
+    )
 
+    -- Only log if message changed
+    if logMessage ~= lastLogMessage then
+        Log(logMessage, "debug")
+        lastLogMessage = logMessage
+    end
+
+    -- Set loaded ammo color when inventory, weapon, or loaded ammo changes
+    if inventoryAmmoChanged or weaponChanged or loadedAmmoChanged then
         local ok, currentAmmoWidget = pcall(function()
             return widget.Text_CurrentAmmo
         end)
 
         if ok and currentAmmoWidget:IsValid() then
-            local ok2, currentAmmo = pcall(function()
-                return widget.CurrentAmmo
-            end)
-
-            Log("CurrentAmmo value: " .. tostring(currentAmmo) .. ", maxCapacity: " .. tostring(maxCapacity), "debug")
-
-            if ok2 and currentAmmo ~= nil then
+            if loadedAmmo ~= nil then
                 local color
+                local colorName = ""
 
-                if currentAmmo == 0 then
+                if loadedAmmo == 0 then
                     color = COLOR_NO_AMMO
+                    colorName = "NO_AMMO (red)"
                 elseif maxCapacity > 0 then
-                    local percentage = currentAmmo / maxCapacity
+                    local percentage = loadedAmmo / maxCapacity
                     if percentage <= LOADED_AMMO_WARNING then
                         color = COLOR_AMMO_LOW
+                        colorName = "AMMO_LOW (yellow)"
                     else
                         color = COLOR_AMMO_GOOD
+                        colorName = "AMMO_GOOD (cyan)"
                     end
                 else
                     -- maxCapacity not ready yet, use default cyan
                     color = COLOR_AMMO_GOOD
+                    colorName = "AMMO_GOOD (cyan - maxCap not ready)"
                 end
+
+                Log("  >>> COLOR UPDATE: " .. colorName, "debug")
 
                 pcall(function()
                     local colorStruct = {
@@ -346,22 +386,18 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, c
 
     -- On first load or weapon switch, check if display is wrong (fallback only)
     local needsUpdate = false
-    if not countChanged and not weaponChanged and count then
+    if not inventoryAmmoChanged and not weaponChanged and inventoryAmmo then
         local ok2, textWidget = pcall(function()
             return widget.Text_MaxAmmo
         end)
         if ok2 and textWidget:IsValid() then
             local currentText = textWidget:GetText():ToString()
-            needsUpdate = (currentText ~= tostring(count))
+            needsUpdate = (currentText ~= tostring(inventoryAmmo))
         end
     end
 
-    -- Update if: count changed, weapon changed, or display is wrong (fallback)
-    if count and (countChanged or weaponChanged or needsUpdate) then
-        if countChanged or weaponChanged then
-            Log("Updating display to: " .. count, "debug")
-        end
-
+    -- Update if: inventory ammo changed, weapon changed, or display is wrong (fallback)
+    if inventoryAmmo and (inventoryAmmoChanged or weaponChanged or needsUpdate) then
         if SHOW_MAX_CAPACITY then
             -- Mode: "Ammo in Gun | Max Capacity | Ammo in Inventory"
             -- Create separator if it doesn't exist
@@ -441,7 +477,6 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, c
                                 local estimatedWidth = 19 + (digitCount - 1) * 18
                                 local extraOffset = estimatedWidth - 37
 
-                                Log("MaxCapacity: " .. tostring(maxCapacity) .. ", digits: " .. digitCount .. ", extraOffset: " .. tostring(extraOffset), "debug")
 
                                 invSlot:SetOffsets({
                                     Left = maxOffsets.Left + baseOffset + extraOffset,
@@ -455,11 +490,9 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, c
                 end
 
                 -- Only update if value actually changed
-                if countChanged or weaponChanged then
-                    Log("Setting inventory count to: " .. tostring(count), "debug")
-
+                if inventoryAmmoChanged or weaponChanged then
                     local setText = pcall(function()
-                        invWidget:SetText(FText(tostring(count)))
+                        invWidget:SetText(FText(tostring(inventoryAmmo)))
                     end)
 
                     if not setText then
@@ -470,9 +503,9 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, c
                         local threshold = INVENTORY_AMMO_THRESHOLD or maxCapacity
 
                         local color
-                        if count == 0 then
+                        if inventoryAmmo == 0 then
                             color = COLOR_NO_AMMO
-                        elseif count > 0 and count <= threshold then
+                        elseif inventoryAmmo > 0 and inventoryAmmo <= threshold then
                             color = COLOR_AMMO_LOW
                         else
                             color = COLOR_AMMO_GOOD
@@ -496,10 +529,8 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, c
                 return widget.Text_MaxAmmo
             end)
             if ok3 and textWidget:IsValid() then
-                Log("Setting text to: " .. tostring(count) .. ", maxCapacity: " .. tostring(maxCapacity), "debug")
-
                 local setText = pcall(function()
-                    textWidget:SetText(FText(tostring(count)))
+                    textWidget:SetText(FText(tostring(inventoryAmmo)))
                 end)
 
                 if not setText then
@@ -510,9 +541,9 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, c
                     local threshold = INVENTORY_AMMO_THRESHOLD or maxCapacity
 
                     local color
-                    if count == 0 then
+                    if inventoryAmmo == 0 then
                         color = COLOR_NO_AMMO
-                    elseif count > 0 and count <= threshold then
+                    elseif inventoryAmmo > 0 and inventoryAmmo <= threshold then
                         color = COLOR_AMMO_LOW
                     else
                         color = COLOR_AMMO_GOOD
@@ -531,18 +562,19 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastCount, c
             end
         end
 
-        return count, currentWeaponAddress, maxCapacity
+        return inventoryAmmo, currentWeaponAddress, maxCapacity, loadedAmmo
     end
 
-    return lastCount, lastWeaponAddress, maxCapacity
+    return lastInventoryAmmo, lastWeaponAddress, maxCapacity, lastLoadedAmmo
 end
 
 -- Hook UpdateAmmo to replace max capacity with inventory count
 local function RegisterAmmoHooks()
     -- Cache per weapon to handle weapon switching correctly
     local lastWeaponPath = nil
-    local lastInventoryCount = -1
+    local lastInventoryAmmo = -1  -- -1 = not fetched yet, 0+ = actual value
     local cachedMaxCapacity = -1  -- -1 = not fetched yet, 0+ = actual value
+    local lastLoadedAmmo = -1  -- -1 = not fetched yet, 0+ = actual value
 
     -- For Blueprint functions, BOTH callbacks act as post-callbacks
     -- So we put our logic in the "pre-hook" which actually runs AFTER UpdateAmmo
@@ -555,6 +587,18 @@ local function RegisterAmmoHooks()
                 return
             end
 
+            -- Check if widget is visible - game hides it for non-ammo weapons
+            -- Visibility enum: 0=Visible, 1=Collapsed, 2=Hidden, 3=HitTestInvisible, 4=SelfHitTestInvisible
+            -- SelfHitTestInvisible (4) means visible but not clickable (normal for HUD elements)
+            local ok_vis, visibility = pcall(function()
+                return widget:GetVisibility()
+            end)
+
+            -- Only skip if Collapsed (1) or Hidden (2) - widget is truly not visible
+            if ok_vis and (visibility == 1 or visibility == 2) then
+                return  -- Widget hidden, skip processing
+            end
+
             local playerPawn = UEHelpers.GetPlayer()
             if not playerPawn:IsValid() then
                 return
@@ -563,16 +607,17 @@ local function RegisterAmmoHooks()
             local ok, weapon = pcall(function()
                 return playerPawn.ItemInHand_BP
             end)
-            if not ok or not IsWeaponReady(weapon) then
+            if not ok or not weapon:IsValid() then
                 return
             end
 
-            lastInventoryCount, lastWeaponPath, cachedMaxCapacity = UpdateAmmoDisplay(
+            lastInventoryAmmo, lastWeaponPath, cachedMaxCapacity, lastLoadedAmmo = UpdateAmmoDisplay(
                 widget,
                 weapon,
                 lastWeaponPath,
-                lastInventoryCount,
-                cachedMaxCapacity
+                lastInventoryAmmo,
+                cachedMaxCapacity,
+                lastLoadedAmmo
             )
         end)
 
