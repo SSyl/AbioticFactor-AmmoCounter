@@ -76,7 +76,7 @@ local function GetLoadedAmmoColor(loadedAmmo, maxCapacity)
         local percentage = loadedAmmo / maxCapacity
         return (percentage <= Config.LoadedAmmoWarning) and COLOR_AMMO_LOW or COLOR_AMMO_GOOD
     else
-        Log("Invalid state: loadedAmmo=" .. tostring(loadedAmmo) .. " but maxCapacity=" .. tostring(maxCapacity), "error")
+        Log.Error("Invalid state: loadedAmmo=%s but maxCapacity=%s", tostring(loadedAmmo), tostring(maxCapacity))
         return COLOR_AMMO_GOOD
     end
 end
@@ -176,13 +176,13 @@ local function CreateSeparatorWidget(widget)
     end)
 
     if not (ok and originalSep:IsValid()) or not (ok2 and canvas:IsValid()) then
-        Log("Failed to get separator template or canvas", "error")
+        Log.Error("Failed to get separator template or canvas")
         return nil
     end
 
     local newSeparator = CloneWidget(originalSep, canvas, "InventoryAmmoSeparator")
     if not newSeparator then
-        Log("Failed to create separator widget", "error")
+        Log.Error("Failed to create separator widget")
         return nil
     end
 
@@ -205,13 +205,13 @@ local function CreateInventoryWidget(widget)
     end)
 
     if not (ok and textTemplate:IsValid()) or not (ok2 and canvas:IsValid()) then
-        Log("Failed to get text template or canvas", "error")
+        Log.Error("Failed to get text template or canvas")
         return nil
     end
 
     local newWidget = CloneWidget(textTemplate, canvas, "Text_InventoryAmmo")
     if not newWidget then
-        Log("Failed to create inventory text widget", "error")
+        Log.Error("Failed to create inventory text widget")
         return nil
     end
 
@@ -446,11 +446,11 @@ local function RegisterAmmoHooks()
         end)
 
         if not success then
-            Log("Hook error: " .. tostring(err), "error")
+            Log.Error("Hook error: %s", tostring(err))
         end
     end)
 
-    Log("Hooks registered", "debug")
+    Log.Debug("Hooks registered")
 end
 
 -- ============================================================
@@ -462,7 +462,7 @@ local hooksRegistered = false
 RegisterInitGameStatePostHook(function()
     if not hooksRegistered then
         hooksRegistered = true
-        Log("Game state initialized", "debug")
+        Log.Debug("Game state initialized")
         RegisterAmmoHooks()
     end
 end)
