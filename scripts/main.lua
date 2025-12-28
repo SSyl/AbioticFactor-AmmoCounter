@@ -9,7 +9,7 @@ local ConfigUtil = require("ConfigUtil")
 -- ============================================================
 
 local UserConfig = require("../config")
-local Config = ConfigUtil.ValidateAmmoCounterConfig(UserConfig, LogUtil.CreateLogger("Ammo Counter (Config)", UserConfig))
+local Config = ConfigUtil.ValidateConfig(UserConfig, LogUtil.CreateLogger("Ammo Counter (Config)", UserConfig))
 local Log = LogUtil.CreateLogger("Ammo Counter", Config)
 
 local COLOR_NO_AMMO = Config.NoAmmo
