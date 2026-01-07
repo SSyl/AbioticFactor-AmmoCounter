@@ -28,7 +28,7 @@ local separatorWidget = nil
 -- DATA READING
 -- ============================================================
 
-local function GetWeaponAmmoData(weapon)
+local function GetWeaponAmmoData(weapon, cachedMaxCapacity)
     local data = {
         loadedAmmo = nil,
         maxCapacity = nil,
@@ -36,18 +36,36 @@ local function GetWeaponAmmoData(weapon)
         isValidWeapon = false
     }
 
+    if not weapon:IsValid() then
+        Log.DebugOnce("GetWeaponAmmoData: weapon invalid")
+        return data
+    end
+
     local ok1, loaded = pcall(function()
         return weapon.CurrentRoundsInMagazine
     end)
-    if ok1 and type(loaded) == "number" then
+    if not ok1 then
+        Log.WarningOnce("Failed to read CurrentRoundsInMagazine: %s", tostring(loaded))
+    elseif loaded == nil then
+        Log.WarningOnce("CurrentRoundsInMagazine returned nil")
+    else
         data.loadedAmmo = loaded
     end
 
-    local ok2, capacity = pcall(function()
-        return weapon.MaxMagazineSize
-    end)
-    if ok2 and type(capacity) == "number" then
-        data.maxCapacity = capacity
+    -- Use cached max capacity if provided, otherwise read from weapon
+    if cachedMaxCapacity then
+        data.maxCapacity = cachedMaxCapacity
+    else
+        local ok2, capacity = pcall(function()
+            return weapon.MaxMagazineSize
+        end)
+        if not ok2 then
+            Log.WarningOnce("Failed to read MaxMagazineSize: %s", tostring(capacity))
+        elseif capacity == nil then
+            Log.WarningOnce("MaxMagazineSize returned nil")
+        else
+            data.maxCapacity = capacity
+        end
     end
 
     local ok3, outParams = pcall(function()
@@ -55,12 +73,19 @@ local function GetWeaponAmmoData(weapon)
         weapon:InventoryHasAmmoForCurrentWeapon(false, params, {}, {})
         return params
     end)
-    if ok3 and outParams and type(outParams.Count) == "number" then
+    if not ok3 then
+        Log.WarningOnce("Failed to call InventoryHasAmmoForCurrentWeapon: %s", tostring(outParams))
+    elseif not outParams or outParams.Count == nil then
+        Log.WarningOnce("InventoryHasAmmoForCurrentWeapon returned no Count (outParams=%s)", type(outParams))
+    else
         data.inventoryAmmo = outParams.Count
     end
 
-    -- Valid if we successfully read both essential ammo values as numbers
-    data.isValidWeapon = (type(data.loadedAmmo) == "number" and type(data.maxCapacity) == "number")
+    data.isValidWeapon = (data.loadedAmmo ~= nil and data.maxCapacity ~= nil)
+
+    if not data.isValidWeapon then
+        Log.WarningOnce("Weapon data incomplete: loadedAmmo=%s, maxCapacity=%s", type(data.loadedAmmo), type(data.maxCapacity))
+    end
 
     return data
 end
@@ -98,12 +123,14 @@ local function SetWidgetColor(widget, color)
         return false
     end
 
-    widget:SetColorAndOpacity({
-        SpecifiedColor = color,
-        ColorUseRule = "UseColor_Specified"
-    })
+    local ok = pcall(function()
+        widget:SetColorAndOpacity({
+            SpecifiedColor = color,
+            ColorUseRule = "UseColor_Specified"
+        })
+    end)
 
-    return true
+    return ok
 end
 
 -- ============================================================
@@ -119,24 +146,33 @@ end
 
 local function GetSlotOffsets(slot)
     if not slot then return nil end
-    return slot:GetOffsets()
+    local ok, offsets = pcall(function()
+        return slot:GetOffsets()
+    end)
+    return ok and offsets or nil
 end
 
 local function SetSlotPosition(slot, left, top, right, bottom)
     if not slot then return false end
 
-    slot:SetOffsets({
-        Left = left,
-        Top = top,
-        Right = right,
-        Bottom = bottom
-    })
+    local ok = pcall(function()
+        slot:SetOffsets({
+            Left = left,
+            Top = top,
+            Right = right,
+            Bottom = bottom
+        })
+    end)
 
-    return true
+    return ok
 end
 
 -- Clone widget using Template parameter to copy all properties
 local function CloneWidget(templateWidget, canvas, widgetName)
+    if not templateWidget:IsValid() or not canvas:IsValid() then
+        return nil
+    end
+
     local widgetClass = templateWidget:GetClass()
     local newWidget = StaticConstructObject(
         widgetClass,
@@ -217,7 +253,9 @@ local function CreateInventoryWidget(widget)
 
     -- IMPORTANT: Use SetJustification() function, not property assignment
     -- Widget is already constructed and will be displayed - must use function calls
-    newWidget:SetJustification(0)  -- 0 = Left, 1 = Center, 2 = Right
+    pcall(function()
+        newWidget:SetJustification(0)  -- 0 = Left, 1 = Center, 2 = Right
+    end)
 
     inventoryTextWidget = newWidget
     return newWidget
@@ -312,7 +350,9 @@ local function UpdateSimpleMode(widget, inventoryAmmo, maxCapacity)
         return
     end
 
-    textWidget:SetText(FText(tostring(inventoryAmmo)))
+    pcall(function()
+        textWidget:SetText(FText(tostring(inventoryAmmo)))
+    end)
 
     local color = GetInventoryAmmoColor(inventoryAmmo, maxCapacity)
     SetWidgetColor(textWidget, color)
@@ -340,7 +380,9 @@ local function UpdateShowMaxCapacityMode(widget, inventoryAmmo, maxCapacity, wea
         RepositionShowMaxCapacityWidgets(widget, maxCapacity)
     end
 
-    invWidget:SetText(FText(tostring(inventoryAmmo)))
+    pcall(function()
+        invWidget:SetText(FText(tostring(inventoryAmmo)))
+    end)
 
     local color = GetInventoryAmmoColor(inventoryAmmo, maxCapacity)
     SetWidgetColor(invWidget, color)
@@ -369,17 +411,27 @@ end
 -- MAIN UPDATE LOGIC
 -- ============================================================
 
--- Updates ammo display and returns current weapon address and inventory ammo for change tracking
+-- Updates ammo display and returns current weapon address, inventory ammo, and max capacity for change tracking
 -- Returns values unchanged on error to preserve state during race conditions
-local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastInventoryAmmo)
-    local data = GetWeaponAmmoData(weapon)
-
-    if not data.isValidWeapon then
-        return lastWeaponAddress, lastInventoryAmmo
+local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastInventoryAmmo, cachedMaxCapacity)
+    local okAddr, currentWeaponAddress = pcall(function()
+        return weapon:GetAddress()
+    end)
+    if not okAddr then
+        return lastWeaponAddress, lastInventoryAmmo, cachedMaxCapacity
     end
 
-    local currentWeaponAddress = weapon:GetAddress()
     local weaponChanged = (currentWeaponAddress ~= lastWeaponAddress)
+
+    -- Only read max capacity from weapon when weapon changes or cache is empty
+    local maxCapacityToUse = (weaponChanged or not cachedMaxCapacity) and nil or cachedMaxCapacity
+
+    local data = GetWeaponAmmoData(weapon, maxCapacityToUse)
+
+    if not data.isValidWeapon then
+        return lastWeaponAddress, lastInventoryAmmo, cachedMaxCapacity
+    end
+
     local inventoryChanged = (data.inventoryAmmo ~= lastInventoryAmmo)
 
     -- Always update loaded ammo color (runs every frame and will get overriden otherwise)
@@ -389,7 +441,7 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastInventor
         UpdateInventoryAmmoDisplay(widget, data.inventoryAmmo, data.maxCapacity, weaponChanged, inventoryChanged)
     end
 
-    return currentWeaponAddress, data.inventoryAmmo
+    return currentWeaponAddress, data.inventoryAmmo, data.maxCapacity
 end
 
 -- ============================================================
@@ -399,6 +451,7 @@ end
 local function RegisterAmmoHooks()
     local lastWeaponAddress = nil
     local lastInventoryAmmo = nil
+    local cachedMaxCapacity = nil
 
     RegisterHook("/Game/Blueprints/Widgets/W_HUD_AmmoCounter.W_HUD_AmmoCounter_C:UpdateAmmo", function(Context)
         local success, err = pcall(function()
@@ -434,15 +487,19 @@ local function RegisterAmmoHooks()
             end)
 
             if not ok or not weapon:IsValid() then
+                -- Clear cache when weapon becomes invalid
+                cachedMaxCapacity = nil
                 return
             end
 
 
             if not weapon:IsA("/Game/Blueprints/Items/Weapons/Abiotic_Weapon_ParentBP.Abiotic_Weapon_ParentBP_C") then
-                return -- Early exit for non-weapons
+                -- Clear cache for non-weapons
+                cachedMaxCapacity = nil
+                return
             end
 
-            lastWeaponAddress, lastInventoryAmmo = UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastInventoryAmmo)
+            lastWeaponAddress, lastInventoryAmmo, cachedMaxCapacity = UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastInventoryAmmo, cachedMaxCapacity)
         end)
 
         if not success then
