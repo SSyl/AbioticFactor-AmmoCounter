@@ -86,7 +86,11 @@ function ConfigUtil.ValidateConfig(userConfig, logFunc)
     config.ShowMaxCapacity = ConfigUtil.ValidateBoolean(config.ShowMaxCapacity, DEFAULTS.ShowMaxCapacity, logFunc, "ShowMaxCapacity")
 
     config.LoadedAmmoWarning = ConfigUtil.ValidateNumber(config.LoadedAmmoWarning, DEFAULTS.LoadedAmmoWarning, 0.0, 1.0, logFunc, "LoadedAmmoWarning")
-    if config.InventoryAmmoWarning ~= nil then
+
+    -- InventoryAmmoWarning: "adaptive" (or nil) = use maxCapacity, number = fixed threshold
+    if config.InventoryAmmoWarning == "adaptive" then
+        config.InventoryAmmoWarning = nil  -- nil triggers adaptive behavior
+    elseif config.InventoryAmmoWarning ~= nil then
         config.InventoryAmmoWarning = ConfigUtil.ValidateNumber(config.InventoryAmmoWarning, nil, 1, nil, logFunc, "InventoryAmmoWarning")
     end
 
