@@ -52,7 +52,6 @@ local function GetWeaponAmmoData(weapon, cachedMaxCapacity)
         data.loadedAmmo = loaded
     end
 
-    -- Use cached max capacity if provided, otherwise read from weapon
     if cachedMaxCapacity then
         data.maxCapacity = cachedMaxCapacity
     else
@@ -328,7 +327,6 @@ end
 -- WIDGET UPDATES
 -- ============================================================
 
--- Update loaded ammo color (left number on HUD)
 local function UpdateLoadedAmmoColor(widget, loadedAmmo, maxCapacity)
     local ok, textWidget = pcall(function()
         return widget.Text_CurrentAmmo
@@ -340,7 +338,6 @@ local function UpdateLoadedAmmoColor(widget, loadedAmmo, maxCapacity)
     end
 end
 
--- Update simple mode: Replace MaxAmmo text with inventory count
 local function UpdateSimpleMode(widget, inventoryAmmo, maxCapacity)
     local ok, textWidget = pcall(function()
         return widget.Text_MaxAmmo
@@ -358,7 +355,6 @@ local function UpdateSimpleMode(widget, inventoryAmmo, maxCapacity)
     SetWidgetColor(textWidget, color)
 end
 
--- Update ShowMaxCapacity mode: Keep MaxAmmo, add separate inventory widget
 local function UpdateShowMaxCapacityMode(widget, inventoryAmmo, maxCapacity, weaponChanged)
     local sepWidget = separatorWidget
     if not sepWidget or not sepWidget:IsValid() then
@@ -388,9 +384,6 @@ local function UpdateShowMaxCapacityMode(widget, inventoryAmmo, maxCapacity, wea
     SetWidgetColor(invWidget, color)
 end
 
--- Update inventory ammo display (router function)
--- Mode 1: ShowMaxCapacity = false → Replace "MaxAmmo" text with inventory count
--- Mode 2: ShowMaxCapacity = true → Keep max ammo, add separate inventory widget
 local function UpdateInventoryAmmoDisplay(widget, inventoryAmmo, maxCapacity, weaponChanged, inventoryChanged)
     if not inventoryAmmo then
         return
@@ -411,7 +404,6 @@ end
 -- MAIN UPDATE LOGIC
 -- ============================================================
 
--- Updates ammo display and returns current weapon address, inventory ammo, and max capacity for change tracking
 -- Returns values unchanged on error to preserve state during race conditions
 local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastInventoryAmmo, cachedMaxCapacity)
     local okAddr, currentWeaponAddress = pcall(function()
@@ -423,7 +415,6 @@ local function UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastInventor
 
     local weaponChanged = (currentWeaponAddress ~= lastWeaponAddress)
 
-    -- Only read max capacity from weapon when weapon changes or cache is empty
     local maxCapacityToUse = (weaponChanged or not cachedMaxCapacity) and nil or cachedMaxCapacity
 
     local data = GetWeaponAmmoData(weapon, maxCapacityToUse)
@@ -487,14 +478,11 @@ local function RegisterAmmoHooks()
             end)
 
             if not ok or not weapon:IsValid() then
-                -- Clear cache when weapon becomes invalid
                 cachedMaxCapacity = nil
                 return
             end
 
-
             if not weapon:IsA("/Game/Blueprints/Items/Weapons/Abiotic_Weapon_ParentBP.Abiotic_Weapon_ParentBP_C") then
-                -- Clear cache for non-weapons
                 cachedMaxCapacity = nil
                 return
             end
