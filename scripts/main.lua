@@ -401,6 +401,14 @@ local function UpdateInventoryAmmoDisplay(widget, inventoryAmmo, maxCapacity, we
 end
 
 -- ============================================================
+-- CACHED REFERENCES (for OnRep_CurrentInventory hook)
+-- ============================================================
+
+local cachedPlayerPawn = nil
+local cachedWidget = nil
+local cachedWeapon = nil
+
+-- ============================================================
 -- MAIN UPDATE LOGIC
 -- ============================================================
 
@@ -465,27 +473,38 @@ local function RegisterAmmoHooks()
 
             -- SelfHitTest (3) = active, Collapsed (1) = hidden
             if visibility ~= 3 then
+                cachedWidget = nil
+                cachedWeapon = nil
                 return
             end
 
-            local playerPawn = UEHelpers.GetPlayer()
-            if not playerPawn:IsValid() then
-                return
+            if not cachedPlayerPawn or not cachedPlayerPawn:IsValid() then
+                cachedPlayerPawn = UEHelpers.GetPlayer()
+                if not cachedPlayerPawn:IsValid() then
+                    return
+                end
             end
 
             local ok, weapon = pcall(function()
-                return playerPawn.ItemInHand_BP
+                return cachedPlayerPawn.ItemInHand_BP
             end)
 
             if not ok or not weapon:IsValid() then
                 cachedMaxCapacity = nil
+                cachedWidget = nil
+                cachedWeapon = nil
                 return
             end
 
             if not weapon:IsA("/Game/Blueprints/Items/Weapons/Abiotic_Weapon_ParentBP.Abiotic_Weapon_ParentBP_C") then
                 cachedMaxCapacity = nil
+                cachedWidget = nil
+                cachedWeapon = nil
                 return
             end
+
+            cachedWidget = widget
+            cachedWeapon = weapon
 
             lastWeaponAddress, lastInventoryAmmo, cachedMaxCapacity = UpdateAmmoDisplay(widget, weapon, lastWeaponAddress, lastInventoryAmmo, cachedMaxCapacity)
         end)
@@ -499,6 +518,86 @@ local function RegisterAmmoHooks()
 end
 
 -- ============================================================
+-- INVENTORY CHANGE DETECTION (OnRep_CurrentInventory Hook)
+-- ============================================================
+
+local function OnInventoryChanged()
+
+    if not cachedWidget or not cachedWidget:IsValid() then
+        return
+    end
+
+    if not cachedWeapon or not cachedWeapon:IsValid() then
+        return
+    end
+
+    local ok, outParams = pcall(function()
+        local params = {}
+        cachedWeapon:InventoryHasAmmoForCurrentWeapon(false, params, {}, {})
+        return params
+    end)
+
+    if not ok or not outParams or outParams.Count == nil then
+        return
+    end
+
+    local inventoryAmmo = outParams.Count
+
+    local ok2, maxCapacity = pcall(function()
+        return cachedWeapon.MaxMagazineSize
+    end)
+
+    if not ok2 or not maxCapacity then
+        return
+    end
+
+    -- Update inventory display (weaponChanged=false, inventoryChanged=true)
+    UpdateInventoryAmmoDisplay(cachedWidget, inventoryAmmo, maxCapacity, false, true)
+
+    Log.Debug("Inventory ammo changed: %d", inventoryAmmo)
+end
+
+local function RegisterInventoryHook()
+    local success, err = pcall(RegisterHook,
+        "/Game/Blueprints/Characters/Abiotic_InventoryComponent.Abiotic_InventoryComponent_C:OnRep_CurrentInventory",
+        function(Context)
+            local inventory = Context:get()
+            if not inventory:IsValid() then return end
+
+            local ok, owner = pcall(function() return inventory:GetOwner() end)
+            if not ok or not owner:IsValid() then return end
+
+            -- Early exit: only process PlayerCharacter inventories
+            if not owner:IsA("/Game/Blueprints/Characters/Abiotic_PlayerCharacter.Abiotic_PlayerCharacter_C") then
+                return
+            end
+
+            if not cachedPlayerPawn or not cachedPlayerPawn:IsValid() then
+                cachedPlayerPawn = UEHelpers.GetPlayer()
+                if not cachedPlayerPawn:IsValid() then
+                    return
+                end
+            end
+
+            -- Filter: only process local player's inventory (compare addresses)
+            local ownerAddr = owner:GetAddress()
+            local playerAddr = cachedPlayerPawn:GetAddress()
+            if ownerAddr ~= playerAddr then
+                return
+            end
+
+            OnInventoryChanged()
+        end
+    )
+
+    if success then
+        Log.Debug("Inventory hook registered")
+    else
+        Log.Error("Failed to register inventory hook: %s", tostring(err))
+    end
+end
+
+-- ============================================================
 -- INITIALIZATION
 -- ============================================================
 
@@ -508,7 +607,8 @@ RegisterInitGameStatePostHook(function()
     if not hooksRegistered then
         hooksRegistered = true
         Log.Debug("Game state initialized")
-        RegisterAmmoHooks()
+        RegisterInventoryHook()  -- Inventory change detection
+        RegisterAmmoHooks()      -- Loaded ammo updates
     end
 end)
 
