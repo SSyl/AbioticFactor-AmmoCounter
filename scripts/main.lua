@@ -603,6 +603,15 @@ end
 
 local hooksRegistered = false
 
+RegisterInitGameStatePreHook(function(Context)
+    cachedPlayerPawn = nil
+    cachedWidget = nil
+    cachedWeapon = nil
+    inventoryTextWidget = nil
+    separatorWidget = nil
+    Log.Debug("Cache cleared on game state change")
+end)
+
 RegisterInitGameStatePostHook(function()
     if not hooksRegistered then
         hooksRegistered = true
