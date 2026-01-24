@@ -76,6 +76,15 @@ if exist "enabled.txt" (
     )
 )
 
+if exist "icon-list.txt" (
+    for %%A in ("icon-list.txt") do (
+        set /a TOTAL_SIZE+=%%~zA
+        set /a FILE_COUNT+=1
+        call :FormatSize %%~zA
+        echo   icon-list.txt - [%C_CYAN%!FORMATTED_SIZE!%C_RESET%]
+    )
+)
+
 REM Recursively find all .lua files in scripts folder
 for /R scripts %%F in (*.lua) do (
     set /a TOTAL_SIZE+=%%~zF
@@ -145,6 +154,10 @@ if exist "enabled.txt" (
     copy "enabled.txt" "%TEMP_DIR%\%MOD_PATH%\enabled.txt" >nul
 )
 
+if exist "icon-list.txt" (
+    copy "icon-list.txt" "%TEMP_DIR%\%MOD_PATH%\icon-list.txt" >nul
+)
+
 REM Recursively copy all .lua files preserving folder structure
 for /R scripts %%F in (*.lua) do (
     set "FULL_PATH=%%F"
@@ -156,10 +169,10 @@ for /R scripts %%F in (*.lua) do (
 )
 
 REM ========================================
-REM Create zip using PowerShell
+REM Create zip using PowerShell (with forward slashes for Linux compatibility)
 REM ========================================
 echo Creating %C_YELLOW%!ZIP_NAME!%C_RESET%...
-powershell -Command "Compress-Archive -Path '%TEMP_DIR%\*' -DestinationPath '!ZIP_NAME!' -Force"
+powershell -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; $tempDir = '%TEMP_DIR%'; $zipPath = Join-Path (Get-Location) '!ZIP_NAME!'; if (Test-Path $zipPath) { Remove-Item $zipPath }; $zip = [System.IO.Compression.ZipFile]::Open($zipPath, 'Create'); Get-ChildItem -Path $tempDir -Recurse -File | ForEach-Object { $relativePath = $_.FullName.Substring($tempDir.Length + 1).Replace('\', '/'); [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $relativePath) | Out-Null }; $zip.Dispose()"
 
 REM Clean up temp directory
 rmdir /s /q "%TEMP_DIR%"
