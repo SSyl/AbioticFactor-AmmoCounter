@@ -62,28 +62,10 @@ end
 -- DATA READING
 -- ============================================================
 
-local function GetWeaponAmmoData(weapon, cachedMax)
-    local data = {
-        loadedAmmo = nil,
-        maxCapacity = nil,
-        inventoryAmmo = nil,
-        isValidWeapon = false
-    }
-
-    if not weapon:IsValid() then return data end
-
-    data.loadedAmmo = weapon.CurrentRoundsInMagazine
-    data.maxCapacity = cachedMax or weapon.MaxMagazineSize
-
+local function QueryInventoryAmmo(weapon)
     local outParams = {}
     weapon:InventoryHasAmmoForCurrentWeapon(false, outParams, {}, {})
-    if outParams.Count ~= nil then
-        data.inventoryAmmo = outParams.Count
-    end
-
-    data.isValidWeapon = (data.loadedAmmo ~= nil and data.maxCapacity ~= nil)
-
-    return data
+    return outParams.Count
 end
 
 -- ============================================================
@@ -326,26 +308,31 @@ local function UpdateAmmoDisplay(widget, weapon)
     local currentWeaponAddress = weapon:GetAddress()
     local weaponChanged = (currentWeaponAddress ~= lastWeaponAddress)
 
-    local maxCapacityToUse = (weaponChanged or not cachedMaxCapacity) and nil or cachedMaxCapacity
+    local loadedAmmo = weapon.CurrentRoundsInMagazine
+    local maxCapacity = (weaponChanged or not cachedMaxCapacity) and weapon.MaxMagazineSize or cachedMaxCapacity
 
-    local data = GetWeaponAmmoData(weapon, maxCapacityToUse)
-
-    if not data.isValidWeapon then
-        return
-    end
-
-    local inventoryChanged = (data.inventoryAmmo ~= lastInventoryAmmo)
+    if loadedAmmo == nil or maxCapacity == nil then return end
 
     -- Always update loaded ammo color (runs every frame and will get overridden otherwise)
-    UpdateLoadedAmmoColor(widget, data.loadedAmmo, data.maxCapacity)
+    UpdateLoadedAmmoColor(widget, loadedAmmo, maxCapacity)
 
-    if inventoryChanged or weaponChanged then
-        UpdateInventoryAmmoDisplay(widget, data.inventoryAmmo, data.maxCapacity, weaponChanged, inventoryChanged)
+    -- Only query inventory ammo on weapon change (expensive UFunction call)
+    -- OnRep_CurrentInventory handles changes between weapon switches
+    local inventoryAmmo = lastInventoryAmmo
+    if weaponChanged or inventoryAmmo == nil then
+        inventoryAmmo = QueryInventoryAmmo(weapon)
+    end
+
+    if inventoryAmmo ~= nil then
+        local inventoryChanged = (inventoryAmmo ~= lastInventoryAmmo)
+        if inventoryChanged or weaponChanged then
+            UpdateInventoryAmmoDisplay(widget, inventoryAmmo, maxCapacity, weaponChanged, inventoryChanged)
+        end
     end
 
     lastWeaponAddress = currentWeaponAddress
-    lastInventoryAmmo = data.inventoryAmmo
-    cachedMaxCapacity = data.maxCapacity
+    lastInventoryAmmo = inventoryAmmo
+    cachedMaxCapacity = maxCapacity
 end
 
 -- ============================================================
@@ -356,14 +343,12 @@ local function OnInventoryChanged()
     if not cachedWidget:IsValid() then return end
     if not cachedWeapon:IsValid() then return end
 
-    local outParams = {}
-    cachedWeapon:InventoryHasAmmoForCurrentWeapon(false, outParams, {}, {})
+    local inventoryAmmo = QueryInventoryAmmo(cachedWeapon)
+    if inventoryAmmo == nil then return end
 
-    if outParams.Count == nil then return end
-
-    local inventoryAmmo = outParams.Count
     local maxCapacity = cachedWeapon.MaxMagazineSize
 
+    lastInventoryAmmo = inventoryAmmo
     UpdateInventoryAmmoDisplay(cachedWidget, inventoryAmmo, maxCapacity, false, true)
 
     Log.Debug("Inventory ammo changed: %d", inventoryAmmo)
