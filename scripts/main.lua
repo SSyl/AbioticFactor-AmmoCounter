@@ -370,9 +370,8 @@ local function OnInventoryChanged()
 end
 
 local function RegisterInventoryHook()
-    local success, err = pcall(RegisterHook,
-        "/Game/Blueprints/Characters/Abiotic_InventoryComponent.Abiotic_InventoryComponent_C:OnRep_CurrentInventory",
-        function(Context)
+    local ok, err = pcall(function()
+        RegisterHook("/Game/Blueprints/Characters/Abiotic_InventoryComponent.Abiotic_InventoryComponent_C:OnRep_CurrentInventory", function(Context)
             local inventory = Context:get()
             if not inventory:IsValid() then return end
 
@@ -394,14 +393,14 @@ local function RegisterInventoryHook()
             if ownerAddr ~= playerAddr then return end
 
             OnInventoryChanged()
-        end
-    )
+        end)
+    end)
 
-    if success then
-        Log.Debug("Inventory hook registered")
-    else
-        Log.Error("Failed to register inventory hook: %s", tostring(err))
+    if not ok then
+        Log.Debug("Inventory hook not ready: %s", tostring(err))
     end
+
+    return ok
 end
 
 -- ============================================================
@@ -409,67 +408,72 @@ end
 -- ============================================================
 
 local function RegisterAmmoHooks()
-    RegisterHook("/Game/Blueprints/Widgets/W_HUD_AmmoCounter.W_HUD_AmmoCounter_C:UpdateAmmo", function(Context)
-        local success, err = pcall(function()
-            local widget = Context:get()
-            if not widget:IsValid() then return end
+    local ok, err = pcall(function()
+        RegisterHook("/Game/Blueprints/Widgets/W_HUD_AmmoCounter.W_HUD_AmmoCounter_C:UpdateAmmo", function(Context)
+            local success, hookErr = pcall(function()
+                local widget = Context:get()
+                if not widget:IsValid() then return end
 
-            -- Filter by visibility (game hides VisCanvas for items that don't use ammo)
-            local visCanvas = widget.VisCanvas
+                -- Filter by visibility (game hides VisCanvas for items that don't use ammo)
+                local visCanvas = widget.VisCanvas
 
-            if not visCanvas:IsValid() then return end
+                if not visCanvas:IsValid() then return end
 
-            local visibility = visCanvas:GetVisibility()
+                local visibility = visCanvas:GetVisibility()
 
-            -- SelfHitTest (3) = active, Collapsed (1) = hidden
-            if visibility ~= 3 then
-                cachedWidget = CreateInvalidObject()
-                cachedWeapon = CreateInvalidObject()
-                return
+                -- SelfHitTest (3) = active, Collapsed (1) = hidden
+                if visibility ~= 3 then
+                    cachedWidget = CreateInvalidObject()
+                    cachedWeapon = CreateInvalidObject()
+                    return
+                end
+
+                if not cachedPlayerPawn:IsValid() then
+                    cachedPlayerPawn = UEHelpers.GetPlayer()
+                    if not cachedPlayerPawn:IsValid() then return end
+                end
+
+                local weapon = cachedPlayerPawn.ItemInHand_BP
+
+                if not weapon:IsValid() then
+                    cachedMaxCapacity = nil
+                    cachedWidget = CreateInvalidObject()
+                    cachedWeapon = CreateInvalidObject()
+                    return
+                end
+
+                local weaponClass = GetWeaponClass()
+                if not weapon:IsA(weaponClass) then
+                    cachedMaxCapacity = nil
+                    cachedWidget = CreateInvalidObject()
+                    cachedWeapon = CreateInvalidObject()
+                    return
+                end
+
+                cachedWidget = widget
+                cachedWeapon = weapon
+
+                UpdateAmmoDisplay(widget, weapon)
+            end)
+
+            if not success then
+                Log.Error("Hook error: %s", tostring(hookErr))
             end
-
-            if not cachedPlayerPawn:IsValid() then
-                cachedPlayerPawn = UEHelpers.GetPlayer()
-                if not cachedPlayerPawn:IsValid() then return end
-            end
-
-            local weapon = cachedPlayerPawn.ItemInHand_BP
-
-            if not weapon:IsValid() then
-                cachedMaxCapacity = nil
-                cachedWidget = CreateInvalidObject()
-                cachedWeapon = CreateInvalidObject()
-                return
-            end
-
-            local weaponClass = GetWeaponClass()
-            if not weapon:IsA(weaponClass) then
-                cachedMaxCapacity = nil
-                cachedWidget = CreateInvalidObject()
-                cachedWeapon = CreateInvalidObject()
-                return
-            end
-
-            cachedWidget = widget
-            cachedWeapon = weapon
-
-            UpdateAmmoDisplay(widget, weapon)
         end)
-
-        if not success then
-            Log.Error("Hook error: %s", tostring(err))
-        end
     end)
 
-    Log.Debug("Hooks registered")
+    if not ok then
+        Log.Debug("Ammo display hook not ready: %s", tostring(err))
+    end
+
+    return ok
 end
 
 -- ============================================================
 -- INITIALIZATION
 -- ============================================================
 
-local hooksRegistered = false
-
+-- Cleanup on map transition (PreHook fires for all machines on menu return)
 RegisterInitGameStatePreHook(function(Context)
     cachedPlayerPawn = CreateInvalidObject()
     cachedWidget = CreateInvalidObject()
@@ -484,13 +488,60 @@ RegisterInitGameStatePreHook(function(Context)
     Log.Debug("Cache cleared on game state change")
 end)
 
-RegisterInitGameStatePostHook(function()
-    if not hooksRegistered then
-        hooksRegistered = true
-        Log.Debug("Game state initialized")
-        RegisterInventoryHook()  -- Inventory change detection
-        RegisterAmmoHooks()      -- Loaded ammo updates
+-- ============================================================
+-- HOOK REGISTRATION WITH RETRY
+-- ============================================================
+-- RegisterInitGameStatePostHook hooks AGameModeBase which only exists
+-- on server/host — clients never receive the callback. Use bounded
+-- retry instead so hooks register on all machines.
+
+local ammoHookRegistered = false
+local inventoryHookRegistered = false
+
+local function TryRegisterHooks()
+    if not ammoHookRegistered then
+        if RegisterAmmoHooks() then
+            ammoHookRegistered = true
+            Log.Debug("Ammo display hook registered")
+        end
     end
+
+    if not inventoryHookRegistered then
+        if RegisterInventoryHook() then
+            inventoryHookRegistered = true
+            Log.Debug("Inventory hook registered")
+        end
+    end
+
+    return ammoHookRegistered and inventoryHookRegistered
+end
+
+local MAX_HOOK_ATTEMPTS = 20
+
+local function RegisterHooksWithRetry(attempts)
+    attempts = attempts or 0
+
+    if attempts >= MAX_HOOK_ATTEMPTS then
+        if not ammoHookRegistered then
+            Log.Warning("Failed to register ammo display hook after %d attempts", MAX_HOOK_ATTEMPTS)
+        end
+        if not inventoryHookRegistered then
+            Log.Warning("Failed to register inventory hook after %d attempts", MAX_HOOK_ATTEMPTS)
+        end
+        return
+    end
+
+    if not TryRegisterHooks() then
+        ExecuteWithDelay(500, function()
+            RegisterHooksWithRetry(attempts + 1)
+        end)
+    else
+        Log.Debug("All hooks registered")
+    end
+end
+
+ExecuteWithDelay(500, function()
+    RegisterHooksWithRetry()
 end)
 
 print("[Ammo Counter] Mod loaded\n")
