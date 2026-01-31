@@ -1,7 +1,19 @@
+--[[
+============================================================================
+LogUtil - Logger Factory
+============================================================================
+
+Creates per-feature loggers with debug flag control and log-once functionality.
+Supports Info, Warning, Error, Debug levels (each with Once variants).
+
+API:
+- CreateLogger(modName, debugEnabled) -> logger
+  logger methods: Debug, Info, Warning, Error, DebugOnce, InfoOnce, WarningOnce, ErrorOnce
+]]
+
 local LogUtil = {}
 
-function LogUtil.CreateLogger(modName, config)
-    local debugEnabled = config and config.Debug
+function LogUtil.CreateLogger(modName, debugEnabled)
     local loggedOnce = {}
 
     local function formatMessage(message, ...)
@@ -45,13 +57,6 @@ function LogUtil.CreateLogger(modName, config)
         WarningOnce = function(msg, ...) doLog("warning", true, msg, ...) end,
         ErrorOnce = function(msg, ...) doLog("error", true, msg, ...) end,
     }
-
-    -- Backward compatible: Log("message", "level")
-    setmetatable(logger, {
-        __call = function(self, message, level)
-            doLog(level or "info", false, message)
-        end
-    })
 
     return logger
 end

@@ -1,38 +1,48 @@
+--[[
+============================================================================
+ConfigUtil - Configuration Schema Validation
+============================================================================
+
+Schema-based config validation with automatic type checking, range validation,
+and default value substitution. Supports boolean, number, string, and color types.
+
+API:
+- ValidateFromSchema(userConfig, schema, logFunc) -> validatedConfig
+- ValidateBoolean(value, default, logFunc, fieldName) -> boolean
+- ValidateNumber(value, default, min, max, logFunc, fieldName) -> number
+- ValidateString(value, default, minLength, maxLength, trim, logFunc, fieldName) -> string
+- ValidateWidgetColor(value, default, logFunc, fieldName) -> {R, G, B, A} (normalized 0-1) for UI widgets
+- ValidateTextColor(value, default, logFunc, fieldName) -> SlateColor format for text widgets
+]]
+
 local ConfigUtil = {}
+
+-- ============================================================
+-- HELPERS
+-- ============================================================
+
+local function round3(x)
+    return math.floor(x * 1000 + 0.5) / 1000
+end
 
 -- ============================================================
 -- GENERIC VALIDATORS
 -- ============================================================
 
--- Validate and convert RGB color (0-255) to UE format (0-1)
-function ConfigUtil.ValidateColor(value, default, logFunc, fieldName)
-    local function isValidRGB(color)
-        return type(color) == "table"
-            and type(color.R) == "number" and color.R >= 0 and color.R <= 255
-            and type(color.G) == "number" and color.G >= 0 and color.G <= 255
-            and type(color.B) == "number" and color.B >= 0 and color.B <= 255
-    end
-
-    local source = value
-    if not isValidRGB(value) then
+function ConfigUtil.ValidateBoolean(value, default, logFunc, fieldName)
+    if type(value) ~= "boolean" then
         if value ~= nil and logFunc and fieldName then
-            logFunc("Invalid " .. fieldName .. " (must be {R=0-255, G=0-255, B=0-255}), using default", "warning")
+            logFunc.Warning("Invalid %s (must be boolean), using %s", fieldName, tostring(default))
         end
-        source = default
+        return default
     end
-
-    return {
-        R = source.R / 255,
-        G = source.G / 255,
-        B = source.B / 255,
-        A = 1.0
-    }
+    return value
 end
 
 function ConfigUtil.ValidateNumber(value, default, min, max, logFunc, fieldName)
     if type(value) ~= "number" then
         if value ~= nil and logFunc and fieldName then
-            logFunc("Invalid " .. fieldName .. " (must be number), using " .. tostring(default), "warning")
+            logFunc.Warning("Invalid %s (must be number), using %s", fieldName, tostring(default))
         end
         return default
     end
@@ -41,13 +51,13 @@ function ConfigUtil.ValidateNumber(value, default, min, max, logFunc, fieldName)
         if logFunc and fieldName then
             local bounds = ""
             if min and max then
-                bounds = " (must be " .. min .. "-" .. max .. ")"
+                bounds = string.format(" (must be %s-%s)", min, max)
             elseif min then
-                bounds = " (must be >= " .. min .. ")"
+                bounds = string.format(" (must be >= %s)", min)
             elseif max then
-                bounds = " (must be <= " .. max .. ")"
+                bounds = string.format(" (must be <= %s)", max)
             end
-            logFunc("Invalid " .. fieldName .. bounds .. ", using " .. tostring(default), "warning")
+            logFunc.Warning("Invalid %s%s, using %s", fieldName, bounds, tostring(default))
         end
         return default
     end
@@ -55,48 +65,147 @@ function ConfigUtil.ValidateNumber(value, default, min, max, logFunc, fieldName)
     return value
 end
 
-function ConfigUtil.ValidateBoolean(value, default, logFunc, fieldName)
-    if type(value) ~= "boolean" then
+function ConfigUtil.ValidateString(value, default, minLength, maxLength, trim, logFunc, fieldName)
+    if type(value) ~= "string" then
         if value ~= nil and logFunc and fieldName then
-            logFunc("Invalid " .. fieldName .. " (must be boolean), using " .. tostring(default), "warning")
+            logFunc.Warning("Invalid %s (must be string), using %s", fieldName, tostring(default))
         end
         return default
     end
+
+    -- Always trim leading/trailing whitespace
+    value = value:match("^%s*(.-)%s*$")
+
+    if maxLength and #value > maxLength then
+        if trim then
+            local trimmed = value:sub(1, maxLength)
+            if logFunc and fieldName then
+                logFunc.Warning("%s exceeded %d chars, trimmed", fieldName, maxLength)
+            end
+            return trimmed
+        else
+            if logFunc and fieldName then
+                logFunc.Warning("%s exceeded %d chars, using default", fieldName, maxLength)
+            end
+            return default
+        end
+    end
+
+    -- Optional min length check
+    if minLength and #value < minLength then
+        if logFunc and fieldName then
+            logFunc.Warning("%s shorter than %d chars, using default", fieldName, minLength)
+        end
+        return default
+    end
+
     return value
 end
 
+function ConfigUtil.ValidateWidgetColor(value, default, logFunc, fieldName)
+    local function isValidRGB(color)
+        return type(color) == "table"
+            and type(color.R) == "number" and color.R >= 0 and color.R <= 255
+            and type(color.G) == "number" and color.G >= 0 and color.G <= 255
+            and type(color.B) == "number" and color.B >= 0 and color.B <= 255
+    end
+
+    local function isValidAlpha(alpha)
+        return type(alpha) == "number" and alpha >= 0 and alpha <= 1
+    end
+
+    local source = value
+    if not isValidRGB(value) then
+        if value ~= nil and logFunc and fieldName then
+            logFunc.Warning("Invalid %s (must be {R=0-255, G=0-255, B=0-255}), using default", fieldName)
+        end
+        source = default
+    end
+
+    -- Alpha is optional: use source.A if valid, else default.A if valid, else 1.0
+    local alpha = 1.0
+    if isValidAlpha(source.A) then
+        alpha = source.A
+    elseif isValidAlpha(default.A) then
+        alpha = default.A
+    end
+
+    return {
+        R = round3(source.R / 255),
+        G = round3(source.G / 255),
+        B = round3(source.B / 255),
+        A = round3(alpha)
+    }
+end
+
+-- Validates color and returns SlateColor format for text widgets (UTextBlock)
+function ConfigUtil.ValidateTextColor(value, default, logFunc, fieldName)
+    local normalized = ConfigUtil.ValidateWidgetColor(value, default, logFunc, fieldName)
+    return {
+        SpecifiedColor = normalized,
+        ColorUseRule = "UseColor_Specified",
+    }
+end
+
 -- ============================================================
--- AMMO COUNTER CONFIG VALIDATOR
+-- SCHEMA PROCESSOR
 -- ============================================================
 
-local DEFAULTS = {
-    Debug = false,
-    ShowMaxCapacity = false,
-    LoadedAmmoWarning = 0.5,
-    InventoryAmmoWarning = nil,
-    NoAmmo = {R = 249, G = 41, B = 41},
-    AmmoLow = {R = 255, G = 200, B = 32},
-    AmmoGood = {R = 114, G = 242, B = 255},
-}
+-- Helper: Get value at path (e.g., "Section.Field" -> config.Section.Field)
+local function getValueAtPath(tbl, path)
+    local current = tbl
+    for segment in path:gmatch("[^%.]+") do
+        if type(current) ~= "table" then return nil end
+        current = current[segment]
+    end
+    return current
+end
 
-function ConfigUtil.ValidateConfig(userConfig, logFunc)
+-- Helper: Set value at path, auto-creating nested tables as needed
+local function setValueAtPath(tbl, path, value)
+    local segments = {}
+    for segment in path:gmatch("[^%.]+") do
+        table.insert(segments, segment)
+    end
+
+    local current = tbl
+    for i = 1, #segments - 1 do
+        local segment = segments[i]
+        if current[segment] == nil then
+            current[segment] = {}
+        end
+        current = current[segment]
+    end
+
+    current[segments[#segments]] = value
+end
+
+function ConfigUtil.ValidateFromSchema(userConfig, schema, logFunc)
     local config = userConfig or {}
 
-    config.Debug = ConfigUtil.ValidateBoolean(config.Debug, DEFAULTS.Debug, logFunc, "Debug")
-    config.ShowMaxCapacity = ConfigUtil.ValidateBoolean(config.ShowMaxCapacity, DEFAULTS.ShowMaxCapacity, logFunc, "ShowMaxCapacity")
+    for _, entry in ipairs(schema) do
+        local path = entry.path
+        local entryType = entry.type
+        local default = entry.default
+        local value = getValueAtPath(config, path)
 
-    config.LoadedAmmoWarning = ConfigUtil.ValidateNumber(config.LoadedAmmoWarning, DEFAULTS.LoadedAmmoWarning, 0.0, 1.0, logFunc, "LoadedAmmoWarning")
+        local validated
+        if entryType == "boolean" then
+            validated = ConfigUtil.ValidateBoolean(value, default, logFunc, path)
+        elseif entryType == "number" then
+            validated = ConfigUtil.ValidateNumber(value, default, entry.min, entry.max, logFunc, path)
+        elseif entryType == "string" then
+            validated = ConfigUtil.ValidateString(value, default, entry.min, entry.max, entry.trim, logFunc, path)
+        elseif entryType == "widgetColor" then
+            validated = ConfigUtil.ValidateWidgetColor(value, default, logFunc, path)
+        elseif entryType == "textColor" then
+            validated = ConfigUtil.ValidateTextColor(value, default, logFunc, path)
+        else
+            validated = value or default
+        end
 
-    -- InventoryAmmoWarning: "adaptive" (or nil) = use maxCapacity, number = fixed threshold
-    if config.InventoryAmmoWarning == "adaptive" then
-        config.InventoryAmmoWarning = nil  -- nil triggers adaptive behavior
-    elseif config.InventoryAmmoWarning ~= nil then
-        config.InventoryAmmoWarning = ConfigUtil.ValidateNumber(config.InventoryAmmoWarning, nil, 1, nil, logFunc, "InventoryAmmoWarning")
+        setValueAtPath(config, path, validated)
     end
-
-    config.NoAmmo = ConfigUtil.ValidateColor(config.NoAmmo, DEFAULTS.NoAmmo, logFunc, "NoAmmo")
-    config.AmmoLow = ConfigUtil.ValidateColor(config.AmmoLow, DEFAULTS.AmmoLow, logFunc, "AmmoLow")
-    config.AmmoGood = ConfigUtil.ValidateColor(config.AmmoGood, DEFAULTS.AmmoGood, logFunc, "AmmoGood")
 
     return config
 end

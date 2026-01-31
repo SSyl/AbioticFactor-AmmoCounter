@@ -5,12 +5,37 @@ local LogUtil = require("LogUtil")
 local ConfigUtil = require("ConfigUtil")
 
 -- ============================================================
--- CONFIG
+-- CONFIG SCHEMA & VALIDATION
 -- ============================================================
 
-local UserConfig = require("../config")
-local Config = ConfigUtil.ValidateConfig(UserConfig, LogUtil.CreateLogger("Ammo Counter (Config)", UserConfig))
-local Log = LogUtil.CreateLogger("Ammo Counter", Config)
+local SCHEMA = {
+    { path = "Debug", type = "boolean", default = false },
+    { path = "ShowMaxCapacity", type = "boolean", default = false },
+    { path = "LoadedAmmoWarning", type = "number", default = 0.5, min = 0.0, max = 1.0 },
+    { path = "NoAmmo", type = "widgetColor", default = { R = 249, G = 41, B = 41 } },
+    { path = "AmmoLow", type = "widgetColor", default = { R = 255, G = 200, B = 32 } },
+    { path = "AmmoGood", type = "widgetColor", default = { R = 114, G = 242, B = 255 } },
+}
+
+local ok, UserConfig = pcall(require, "../config")
+if not ok then
+    print("[Ammo Counter] WARNING: Could not load config.lua, using defaults\n")
+    UserConfig = {}
+end
+
+local configLog = LogUtil.CreateLogger("Ammo Counter (Config)", false)
+local Config = ConfigUtil.ValidateFromSchema(UserConfig, SCHEMA, configLog)
+
+-- Handle InventoryAmmoWarning separately (special "adaptive" value)
+if UserConfig.InventoryAmmoWarning == "adaptive" or UserConfig.InventoryAmmoWarning == nil then
+    Config.InventoryAmmoWarning = nil  -- nil triggers adaptive behavior
+elseif type(UserConfig.InventoryAmmoWarning) == "number" and UserConfig.InventoryAmmoWarning >= 1 then
+    Config.InventoryAmmoWarning = UserConfig.InventoryAmmoWarning
+else
+    Config.InventoryAmmoWarning = nil
+end
+
+local Log = LogUtil.CreateLogger("Ammo Counter", Config.Debug)
 
 local COLOR_NO_AMMO = Config.NoAmmo
 local COLOR_AMMO_LOW = Config.AmmoLow
@@ -459,7 +484,7 @@ end
 -- ============================================================
 
 -- Cleanup on map transition (PreHook fires for all machines on menu return)
-RegisterInitGameStatePreHook(function(Context)
+RegisterInitGameStatePreHook(function()
     cachedPlayerPawn = CreateInvalidObject()
     cachedWidget = CreateInvalidObject()
     cachedWeapon = CreateInvalidObject()
