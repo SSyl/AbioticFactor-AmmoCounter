@@ -383,7 +383,7 @@ local function RegisterInventoryHook()
     local ok, err = pcall(function()
         RegisterHook("/Game/Blueprints/Characters/Abiotic_InventoryComponent.Abiotic_InventoryComponent_C:OnRep_CurrentInventory", function(Context)
             local inventory = Context:get()
-            if not inventory:IsValid() then return end
+            if not inventory or not inventory:IsValid() then return end
 
             local owner = inventory:GetOwner()
             if not owner:IsValid() then return end
@@ -422,7 +422,7 @@ local function RegisterAmmoHooks()
         RegisterHook("/Game/Blueprints/Widgets/W_HUD_AmmoCounter.W_HUD_AmmoCounter_C:UpdateAmmo", function(Context)
             local success, hookErr = pcall(function()
                 local widget = Context:get()
-                if not widget:IsValid() then return end
+                if not widget or not widget:IsValid() then return end
 
                 -- Filter by visibility (game hides VisCanvas for items that don't use ammo)
                 local visCanvas = widget.VisCanvas
