@@ -1,3 +1,7 @@
+## Archived
+This mod has been rolled into Rebiotic Recalibration, which can be found here:
+
+[https://github.com/SSyl/ABF-RebioticRecalibration](https://github.com/SSyl/ABF-RebioticRecalibration)
 # Ammo Counter
 
 A UE4SS mod for Abiotic Factor that replaces the magazine capacity display with your total inventory ammo count.
